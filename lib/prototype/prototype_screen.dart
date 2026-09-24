@@ -74,10 +74,10 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
     } else if (type == 'onRecordingState') {
       setState(() {
         _recordingState = event['state']?.toString() ?? _recordingState;
-        _lastError = event['error']?.toString();
-        _recordingSource = event['source']?.toString() ?? _recordingSource;
-        final path = event['path']?.toString();
-        if (path != null && path.isNotEmpty) {
+        _lastError = _nonEmpty(event['error']) ?? _lastError;
+        _applySource(event['source']);
+        final path = _nonEmpty(event['path']);
+        if (path != null) {
           _lastPath = path;
         }
       });
@@ -85,6 +85,21 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
         _refreshRecordings();
       }
     }
+  }
+
+  /// Only replace source when native sends a real non-empty value.
+  void _applySource(Object? value) {
+    final s = _nonEmpty(value);
+    if (s != null) {
+      _recordingSource = s;
+    }
+  }
+
+  String? _nonEmpty(Object? value) {
+    if (value == null) return null;
+    final s = value.toString().trim();
+    if (s.isEmpty || s == 'null' || s == 'nil') return null;
+    return s;
   }
 
   Future<void> _handleAutoRecord(String callState) async {
@@ -196,14 +211,20 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
       setState(() {
         final started = result['recordingStarted'] == true;
         _recordingState = started ? 'recording' : 'failed';
-        _recordingSource = result['recordingSourceTried']?.toString();
-        _lastPath = result['path']?.toString() ?? _lastPath;
-        _lastError = result['error']?.toString();
+        _applySource(result['recordingSourceTried']);
+        _lastPath = _nonEmpty(result['path']) ?? _lastPath;
+        _lastError = _nonEmpty(result['error']);
+        if (!started && _recordingSource == null) {
+          _recordingSource = _lastError != null
+              ? 'failed (${_useShizuku ? 'Shizuku' : 'Normal'})'
+              : 'unknown';
+        }
       });
     } catch (e) {
       setState(() {
         _recordingState = 'failed';
         _lastError = e.toString();
+        _recordingSource ??= 'error';
       });
     } finally {
       setState(() => _busy = false);
@@ -217,9 +238,9 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
       final result = await CallBridge.stopRecording();
       setState(() {
         _recordingState = result['error'] == null ? 'stopped' : 'failed';
-        _lastPath = result['path']?.toString() ?? _lastPath;
-        _recordingSource = result['recordingSourceTried']?.toString();
-        _lastError = result['error']?.toString();
+        _lastPath = _nonEmpty(result['path']) ?? _lastPath;
+        _applySource(result['recordingSourceTried']);
+        _lastError = _nonEmpty(result['error']);
       });
       await _refreshRecordings();
     } catch (e) {
@@ -384,8 +405,12 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
           ),
           const SizedBox(height: 20),
           _sectionTitle('Recording'),
+          Text('Mode: ${_useShizuku ? 'Shizuku (elevated)' : 'Normal (MIC)'}'),
           Text('State: $_recordingState'),
-          Text('Source: ${_recordingSource ?? '—'}'),
+          Text(
+            'Source: ${_recordingSource ?? '— (not set yet — start a recording)'}',
+            style: theme.textTheme.titleSmall,
+          ),
           Text('Last path: ${_lastPath ?? '—'}'),
           if (_lastError != null && _lastError!.isNotEmpty)
             Padding(

@@ -186,7 +186,7 @@ class CallVaultBridge(
                         "type" to "onRecordingState",
                         "state" to if (start.started) "recording" else "failed",
                         "path" to start.path,
-                        "source" to start.source,
+                        "source" to (start.source ?: if (start.started) "unknown" else null),
                         "error" to start.error,
                     ),
                 )
@@ -332,7 +332,7 @@ class CallVaultBridge(
     private fun CallRecorder.StartResult.toMap(): Map<String, Any?> = mapOf(
         "recordingStarted" to started,
         "path" to path,
-        "recordingSourceTried" to source,
+        "recordingSourceTried" to (source ?: if (started) "unknown" else null),
         "error" to error,
     )
 
@@ -340,7 +340,7 @@ class CallVaultBridge(
         "path" to path,
         "durationMs" to durationMs,
         "bytes" to bytes,
-        "recordingSourceTried" to source,
+        "recordingSourceTried" to (source ?: "unknown"),
         "error" to error,
     )
 
