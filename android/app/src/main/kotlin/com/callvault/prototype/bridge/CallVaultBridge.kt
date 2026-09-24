@@ -162,6 +162,17 @@ class CallVaultBridge(
                 result.success(smsHelper.threadMessages(address, limit))
             }
             "listSims" -> result.success(smsHelper.listSims())
+            "listContacts" -> {
+                val limit = call.argument<Int>("limit") ?: 500
+                result.success(smsHelper.listContacts(limit))
+            }
+            "isDefaultSmsApp" -> result.success(mapOf("isDefault" to smsHelper.isDefaultSmsApp()))
+            "requestDefaultSmsRole" -> result.success(mapOf("requested" to smsHelper.requestDefaultSmsRole()))
+            "openMmsComposer" -> {
+                val addresses = call.argument<List<String>>("addresses") ?: emptyList()
+                val body = call.argument<String>("body") ?: ""
+                result.success(mapOf("ok" to smsHelper.openMmsComposer(addresses, body)))
+            }
             "sendSms" -> {
                 val address = call.argument<String>("address") ?: ""
                 val body = call.argument<String>("body") ?: ""
@@ -176,11 +187,42 @@ class CallVaultBridge(
                 val body = call.argument<String>("body") ?: ""
                 val subscriptionId = call.argument<Int>("subscriptionId") ?: -1
                 val allSims = call.argument<Boolean>("allSims") == true
+                val blastId = call.argument<String>("blastId")
                 Thread {
-                    val payload = smsHelper.sendBlast(addresses, body, subscriptionId, allSims)
+                    val payload = smsHelper.sendBlast(
+                        addresses = addresses,
+                        body = body,
+                        subscriptionId = subscriptionId,
+                        allSims = allSims,
+                        blastId = blastId,
+                        onProgress = { p -> emit(p) },
+                    )
                     activity.runOnUiThread { result.success(payload) }
                 }.start()
             }
+            "cancelSmsBlast" -> {
+                smsHelper.cancelBlast()
+                result.success(mapOf("ok" to true))
+            }
+            "scheduleSmsBlast" -> {
+                val addresses = call.argument<List<String>>("addresses") ?: emptyList()
+                val body = call.argument<String>("body") ?: ""
+                val triggerAtMs = (call.argument<Number>("triggerAtMs")?.toLong()) ?: 0L
+                val subscriptionId = call.argument<Int>("subscriptionId") ?: -1
+                val allSims = call.argument<Boolean>("allSims") == true
+                val priority = call.argument<String>("priority") ?: "Low"
+                result.success(
+                    smsHelper.scheduleBlast(
+                        addresses,
+                        body,
+                        triggerAtMs,
+                        subscriptionId,
+                        allSims,
+                        priority,
+                    ),
+                )
+            }
+            "listScheduledBlasts" -> result.success(smsHelper.listScheduledBlasts())
             else -> result.notImplemented()
         }
     }
@@ -341,6 +383,8 @@ class CallVaultBridge(
             "phone" to hasPermission(Manifest.permission.READ_PHONE_STATE),
             "smsSend" to hasPermission(Manifest.permission.SEND_SMS),
             "smsRead" to hasPermission(Manifest.permission.READ_SMS),
+            "contacts" to hasPermission(Manifest.permission.READ_CONTACTS),
+            "defaultSms" to smsHelper.isDefaultSmsApp(),
         )
         if (Build.VERSION.SDK_INT >= 33) {
             map["notifications"] = hasPermission(Manifest.permission.POST_NOTIFICATIONS)
@@ -357,9 +401,13 @@ class CallVaultBridge(
             Manifest.permission.SEND_SMS,
             Manifest.permission.READ_SMS,
             Manifest.permission.RECEIVE_SMS,
+            Manifest.permission.READ_CONTACTS,
         )
         if (Build.VERSION.SDK_INT >= 33) {
             list.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            list.add(Manifest.permission.SCHEDULE_EXACT_ALARM)
         }
         return list.toTypedArray()
     }

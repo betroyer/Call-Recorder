@@ -174,13 +174,77 @@ class CallBridge {
     required String body,
     int subscriptionId = -1,
     bool allSims = false,
+    String? blastId,
   }) async {
     final result = await _methods.invokeMethod<dynamic>('sendSmsBlast', {
       'addresses': addresses,
       'body': body,
       'subscriptionId': subscriptionId,
       'allSims': allSims,
+      'blastId': blastId,
     });
     return Map<String, dynamic>.from(result as Map);
+  }
+
+  static Future<void> cancelSmsBlast() async {
+    await _methods.invokeMethod<dynamic>('cancelSmsBlast');
+  }
+
+  static Future<List<Map<String, dynamic>>> listContacts({int limit = 500}) async {
+    final result = await _methods.invokeMethod<dynamic>('listContacts', {'limit': limit});
+    if (result is! List) return const [];
+    return result
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  static Future<bool> isDefaultSmsApp() async {
+    final result = await _methods.invokeMethod<dynamic>('isDefaultSmsApp');
+    return (result as Map)['isDefault'] == true;
+  }
+
+  static Future<bool> requestDefaultSmsRole() async {
+    final result = await _methods.invokeMethod<dynamic>('requestDefaultSmsRole');
+    return (result as Map)['requested'] == true;
+  }
+
+  static Future<bool> openMmsComposer({
+    required List<String> addresses,
+    String body = '',
+  }) async {
+    final result = await _methods.invokeMethod<dynamic>('openMmsComposer', {
+      'addresses': addresses,
+      'body': body,
+    });
+    return (result as Map)['ok'] == true;
+  }
+
+  static Future<Map<String, dynamic>> scheduleSmsBlast({
+    required List<String> addresses,
+    required String body,
+    required int triggerAtMs,
+    int subscriptionId = -1,
+    bool allSims = false,
+    String priority = 'Low',
+  }) async {
+    final result = await _methods.invokeMethod<dynamic>('scheduleSmsBlast', {
+      'addresses': addresses,
+      'body': body,
+      'triggerAtMs': triggerAtMs,
+      'subscriptionId': subscriptionId,
+      'allSims': allSims,
+      'priority': priority,
+    });
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  static Future<List<Map<String, dynamic>>> listScheduledBlasts() async {
+    final result = await _methods.invokeMethod<dynamic>('listScheduledBlasts');
+    if (result is! List) return const [];
+    return result
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
   }
 }
