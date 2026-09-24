@@ -270,25 +270,38 @@ class SmsHelper(private val activity: Activity) {
             null
         } ?: return emptyList()
 
-        val byAddress = linkedMapOf<String, Map<String, Any?>>()
+        val byAddress = linkedMapOf<String, MutableMap<String, Any?>>()
+        val unreadByAddress = mutableMapOf<String, Int>()
         cursor.use {
-            while (it.moveToNext() && byAddress.size < limit) {
+            while (it.moveToNext()) {
                 val address = it.getString(1)?.trim().orEmpty()
-                if (address.isEmpty() || byAddress.containsKey(address)) continue
-                byAddress[address] = mapOf(
-                    "address" to address,
-                    "body" to (it.getString(2) ?: ""),
-                    "dateMs" to it.getLong(3),
-                    "type" to when (it.getInt(4)) {
-                        Telephony.Sms.MESSAGE_TYPE_INBOX -> "inbox"
-                        Telephony.Sms.MESSAGE_TYPE_SENT -> "sent"
-                        else -> "other"
-                    },
-                    "read" to (it.getInt(5) == 1),
-                )
+                if (address.isEmpty()) continue
+                val type = it.getInt(4)
+                val read = it.getInt(5) == 1
+                if (type == Telephony.Sms.MESSAGE_TYPE_INBOX && !read) {
+                    unreadByAddress[address] = (unreadByAddress[address] ?: 0) + 1
+                }
+                if (!byAddress.containsKey(address) && byAddress.size < limit) {
+                    byAddress[address] = mutableMapOf(
+                        "id" to it.getLong(0),
+                        "address" to address,
+                        "body" to (it.getString(2) ?: ""),
+                        "dateMs" to it.getLong(3),
+                        "type" to when (type) {
+                            Telephony.Sms.MESSAGE_TYPE_INBOX -> "inbox"
+                            Telephony.Sms.MESSAGE_TYPE_SENT -> "sent"
+                            else -> "other"
+                        },
+                    )
+                }
             }
         }
-        return byAddress.values.toList()
+        return byAddress.map { (address, row) ->
+            val unread = unreadByAddress[address] ?: 0
+            row["unreadCount"] = unread
+            row["read"] = unread == 0
+            row
+        }
     }
 
     fun threadMessages(address: String, limit: Int = 200): List<Map<String, Any?>> {
@@ -383,6 +396,15 @@ class SmsHelper(private val activity: Activity) {
                 sms.sendTextMessage(address, null, body, sent, delivered)
             }
             writeToSentBox(address, body)
+            SmsEventHub.emit(
+                mapOf(
+                    "type" to "onSmsChanged",
+                    "reason" to "sent",
+                    "address" to address,
+                    "body" to body,
+                    "dateMs" to System.currentTimeMillis(),
+                ),
+            )
             mapOf(
                 "ok" to true,
                 "status" to "sent",
@@ -652,10 +674,13 @@ class SmsHelper(private val activity: Activity) {
                 put(Telephony.Sms.ADDRESS, address)
                 put(Telephony.Sms.BODY, body)
                 put(Telephony.Sms.DATE, System.currentTimeMillis())
+                put(Telephony.Sms.DATE_SENT, System.currentTimeMillis())
                 put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT)
                 put(Telephony.Sms.READ, 1)
+                put(Telephony.Sms.SEEN, 1)
             }
-            activity.contentResolver.insert(Uri.parse("content://sms/sent"), values)
+            activity.contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
+                ?: activity.contentResolver.insert(Uri.parse("content://sms/sent"), values)
         } catch (_: Exception) {
         }
     }

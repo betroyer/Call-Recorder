@@ -84,6 +84,11 @@ class _ThreadScreenState extends State<ThreadScreen> {
       if (result['ok'] == true) {
         _reply.clear();
         await _load();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Sent — synced to Inbox')),
+          );
+        }
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('${result['error']}')),

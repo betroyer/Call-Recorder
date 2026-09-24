@@ -66,6 +66,15 @@ class SmsHelperApp(private val context: Context) {
                 sms.sendTextMessage(address, null, body, sent, delivered)
             }
             writeToSentBox(address, body)
+            SmsEventHub.emit(
+                mapOf(
+                    "type" to "onSmsChanged",
+                    "reason" to "sent",
+                    "address" to address,
+                    "body" to body,
+                    "dateMs" to System.currentTimeMillis(),
+                ),
+            )
             mapOf("ok" to true, "status" to "sent", "address" to address, "subscriptionId" to subscriptionId)
         } catch (e: Exception) {
             mapOf("ok" to false, "status" to "failed", "error" to (e.message ?: "send failed"), "address" to address)

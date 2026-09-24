@@ -6,6 +6,8 @@ import '../../bridge/call_bridge.dart';
 import 'sms_permission_help.dart';
 import 'thread_screen.dart';
 
+/// Conversation inbox: shows both your sent messages and customer replies,
+/// kept in sync with the Message tab.
 class InboxScreen extends StatefulWidget {
   const InboxScreen({super.key});
 
@@ -59,7 +61,8 @@ class _InboxScreenState extends State<InboxScreen> {
         }
         return;
       }
-      final list = await CallBridge.listSmsInbox();
+      // Conversations include sent + received so Message and Inbox stay in sync.
+      final list = await CallBridge.listSmsConversations();
       if (mounted) {
         setState(() {
           _items = list;
@@ -82,17 +85,21 @@ class _InboxScreenState extends State<InboxScreen> {
     await _load();
   }
 
-  Future<void> _setRead(Map<String, dynamic> m, bool read, {bool silent = false}) async {
-    final id = (m['id'] as num?)?.toInt();
-    if (id == null) return;
-    final result = await CallBridge.setSmsRead(id: id, read: read);
+  Future<void> _setThreadRead(Map<String, dynamic> m, bool read, {bool silent = false}) async {
+    final address = m['address']?.toString() ?? '';
+    if (address.isEmpty) return;
+    final result = await CallBridge.setSmsThreadRead(address: address, read: read);
     if (!mounted) return;
     if (result['ok'] == true) {
       setState(() {
-        final i = _items.indexWhere((e) => (e['id'] as num?)?.toInt() == id);
+        final i = _items.indexWhere((e) => e['address']?.toString() == address);
         if (i >= 0) {
           _items = List<Map<String, dynamic>>.from(_items);
-          _items[i] = {..._items[i], 'read': read};
+          _items[i] = {
+            ..._items[i],
+            'read': read,
+            'unreadCount': read ? 0 : (_items[i]['unreadCount'] ?? 1),
+          };
         }
       });
       if (!silent) {
@@ -122,6 +129,14 @@ class _InboxScreenState extends State<InboxScreen> {
       return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
     }
     return '${dt.month}/${dt.day}';
+  }
+
+  String _preview(Map<String, dynamic> m) {
+    final body = m['body']?.toString() ?? '';
+    if (m['type']?.toString() == 'sent') {
+      return body.isEmpty ? 'You: (empty)' : 'You: $body';
+    }
+    return body;
   }
 
   Widget _defaultSmsBanner() {
@@ -164,11 +179,11 @@ class _InboxScreenState extends State<InboxScreen> {
           children: [
             if (!_defaultSms) _defaultSmsBanner(),
             const SizedBox(height: 120),
-            const Center(child: Text('No inbox messages yet.')),
+            const Center(child: Text('No conversations yet.')),
             const SizedBox(height: 8),
             const Center(
               child: Text(
-                'Customer replies appear here when SMS arrives.',
+                'Send from Message, or wait for a customer reply — both appear here.',
                 textAlign: TextAlign.center,
               ),
             ),
@@ -189,7 +204,6 @@ class _InboxScreenState extends State<InboxScreen> {
           }
           final m = _items[_defaultSms ? index : index - 1];
           final address = m['address']?.toString() ?? '';
-          final body = m['body']?.toString() ?? '';
           final isRead = m['read'] == true;
           final titleStyle = isRead
               ? theme.textTheme.titleMedium
@@ -207,7 +221,7 @@ class _InboxScreenState extends State<InboxScreen> {
             ),
             title: Text(address, style: titleStyle),
             subtitle: Text(
-              body,
+              _preview(m),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: bodyStyle,
@@ -231,8 +245,8 @@ class _InboxScreenState extends State<InboxScreen> {
                 ),
                 PopupMenuButton<String>(
                   onSelected: (value) {
-                    if (value == 'read') _setRead(m, true);
-                    if (value == 'unread') _setRead(m, false);
+                    if (value == 'read') _setThreadRead(m, true);
+                    if (value == 'unread') _setThreadRead(m, false);
                   },
                   itemBuilder: (context) => [
                     if (!isRead)
@@ -248,7 +262,7 @@ class _InboxScreenState extends State<InboxScreen> {
             ),
             onTap: () async {
               if (!isRead) {
-                await _setRead(m, true, silent: true);
+                await _setThreadRead(m, true, silent: true);
               }
               if (!context.mounted) return;
               await Navigator.of(context).push(
@@ -279,8 +293,8 @@ class _InboxScreenState extends State<InboxScreen> {
                   ),
                 ),
               );
-              if (choice == 'read') await _setRead(m, true);
-              if (choice == 'unread') await _setRead(m, false);
+              if (choice == 'read') await _setThreadRead(m, true);
+              if (choice == 'unread') await _setThreadRead(m, false);
             },
           );
         },

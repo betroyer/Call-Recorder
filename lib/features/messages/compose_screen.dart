@@ -92,10 +92,17 @@ class _ComposeScreenState extends State<ComposeScreen> {
       if (!mounted) return;
       if (result['ok'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Message sent')),
+          const SnackBar(content: Text('Message sent — also in Inbox')),
         );
         _body.clear();
         await _bootstrap();
+        if (!mounted) return;
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => ThreadScreen(address: address),
+          ),
+        );
+        await _refreshConversations();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('${result['error']}')),
@@ -182,27 +189,31 @@ class _ComposeScreenState extends State<ComposeScreen> {
               : const Text('SEND'),
         ),
         const SizedBox(height: 24),
-        Text('Recent', style: Theme.of(context).textTheme.titleMedium),
+        Text('Conversations (same as Inbox)', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         if (_conversations.isEmpty)
-          const Text('No conversations yet.')
+          const Text('No conversations yet. Send a message — it will show in Inbox too.')
         else
           ..._conversations.map((c) {
             final address = c['address']?.toString() ?? '';
+            final type = c['type']?.toString();
+            final body = c['body']?.toString() ?? '';
+            final preview = type == 'sent' ? 'You: $body' : body;
             return ListTile(
               contentPadding: EdgeInsets.zero,
               title: Text(address),
               subtitle: Text(
-                c['body']?.toString() ?? '',
+                preview,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              onTap: () {
-                Navigator.of(context).push(
+              onTap: () async {
+                await Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => ThreadScreen(address: address),
                   ),
                 );
+                await _refreshConversations();
               },
             );
           }),
