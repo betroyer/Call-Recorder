@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../branding.dart';
 import '../../bridge/call_bridge.dart';
 
 class ThreadScreen extends StatefulWidget {
@@ -79,7 +80,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
     try {
       final result = await CallBridge.sendSms(
         address: widget.address,
-        body: body,
+        body: AppBrand.brandMessage(body),
       );
       if (result['ok'] == true) {
         _reply.clear();

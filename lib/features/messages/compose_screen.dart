@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../branding.dart';
 import '../../bridge/call_bridge.dart';
 import 'sms_permission_help.dart';
 import 'thread_screen.dart';
@@ -88,9 +89,10 @@ class _ComposeScreenState extends State<ComposeScreen> {
     if (address.isEmpty || body.isEmpty || _sending) return;
     setState(() => _sending = true);
     try {
+      final branded = AppBrand.brandMessage(body);
       final result = await CallBridge.sendSms(
         address: address,
-        body: body,
+        body: branded,
         subscriptionId: _subscriptionId,
       );
       if (!mounted) return;
@@ -160,10 +162,11 @@ class _ComposeScreenState extends State<ComposeScreen> {
           controller: _body,
           minLines: 4,
           maxLines: 8,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: 'Message',
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
             alignLabelWithHint: true,
+            helperText: 'Sent as “${AppBrand.companyName}: …” so customers see your business name',
           ),
         ),
         const SizedBox(height: 8),

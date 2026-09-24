@@ -144,7 +144,7 @@ class _InboxScreenState extends State<InboxScreen> {
       tileColor: Theme.of(context).colorScheme.secondaryContainer,
       leading: const Icon(Icons.sms_outlined),
       title: const Text(
-        'For reliable incoming customer SMS, set CallVault as the default SMS app.',
+        'For reliable incoming customer SMS, set PYX Food Products as the default SMS app.',
       ),
       trailing: TextButton(
         onPressed: () async {

@@ -294,7 +294,7 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
       appBar: widget.embedded
           ? null
           : AppBar(
-              title: const Text('CallVault Prototype'),
+              title: const Text('PYX Food Products'),
             ),
       body: ListView(
         padding: const EdgeInsets.all(16),

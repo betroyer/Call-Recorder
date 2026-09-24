@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../branding.dart';
 import '../../bridge/call_bridge.dart';
 
 /// Explains Android "restricted settings" block for sideloaded SMS apps.
@@ -33,7 +34,7 @@ class SmsPermissionHelp extends StatelessWidget {
                   ? 'Sideloaded apps need “Allow restricted settings”, then SMS permission.'
                   : 'Android blocked SMS for this sideloaded APK.\n\n'
                       '1. Open the system dialog → Learn how to allow access, or:\n'
-                      '2. Settings → Apps → CallVault Prototype → ⋮ (top right)\n'
+                      '2. Settings → Apps → ${AppBrand.appName} → ⋮ (top right)\n'
                       '3. Tap Allow restricted settings\n'
                       '4. Come back here → Grant SMS / Request permissions\n'
                       '5. Allow SMS when Android asks',

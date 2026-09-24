@@ -97,7 +97,7 @@ class RecordingService : Service() {
             "Call recording",
             NotificationManager.IMPORTANCE_LOW,
         )
-        channel.description = "Shown while CallVault Prototype is recording"
+        channel.description = "Shown while PYX Food Products is recording"
         manager.createNotificationChannel(channel)
     }
 
@@ -110,7 +110,7 @@ class RecordingService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("CallVault — Recording")
+            .setContentTitle("PYX Food Products — Recording")
             .setContentText("Recording active. Two-way audio is not guaranteed.")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pending)

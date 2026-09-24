@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../branding.dart';
 import '../../bridge/call_bridge.dart';
 import '../../database/app_database.dart';
 import '../../database/db.dart';
@@ -243,12 +244,13 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
     if (recipients.isEmpty || body.isEmpty || _sending) return;
     if (!await _confirmRateLimit(recipients.length)) return;
 
+    final branded = AppBrand.brandMessage(body);
     final allSims = _subscriptionId < 0;
 
     if (_scheduledAt != null && _scheduledAt!.isAfter(DateTime.now().add(const Duration(seconds: 5)))) {
       final result = await CallBridge.scheduleSmsBlast(
         addresses: recipients,
-        body: body,
+        body: branded,
         triggerAtMs: _scheduledAt!.millisecondsSinceEpoch,
         subscriptionId: allSims ? -1 : _subscriptionId,
         allSims: allSims,
@@ -267,7 +269,7 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
       return;
     }
 
-    await _doSend(recipients, body, allSims);
+    await _doSend(recipients, branded, allSims);
   }
 
   Future<void> _doSend(List<String> recipients, String body, bool allSims) async {
