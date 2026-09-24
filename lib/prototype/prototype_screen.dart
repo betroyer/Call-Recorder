@@ -312,7 +312,7 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
           _sectionTitle('Shizuku (elevated recording)'),
           Text(
             'Install Shizuku, enable Wireless Debugging, start Shizuku, then grant this app. '
-            'Tries VOICE_CALL / uplink / downlink in a shell process.',
+            'Tries VOICE_DOWNLINK+UPLINK mix (skips VOICE_CALL which mutes many phones).',
             style: theme.textTheme.bodySmall,
           ),
           const SizedBox(height: 8),

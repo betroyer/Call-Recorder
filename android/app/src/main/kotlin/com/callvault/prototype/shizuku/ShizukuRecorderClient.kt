@@ -253,6 +253,6 @@ class ShizukuRecorderClient(private val context: Context) {
     companion object {
         private const val TAG = "ShizukuRecorderClient"
         const val REQ_CODE = 1501
-        private const val USER_SERVICE_VERSION = 2
+        private const val USER_SERVICE_VERSION = 3
     }
 }

@@ -10,10 +10,8 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * MediaRecorder wrapper.
- * Prefers MIC so cellular call audio routing is not stolen (VOICE_COMMUNICATION
- * often mutes the live call). Falls back to VOICE_COMMUNICATION only if MIC fails.
- * Two-way cellular audio is still device/OS dependent and not guaranteed.
+ * MediaRecorder wrapper — MIC only for the normal (non-Shizuku) path.
+ * Never uses VOICE_COMMUNICATION: it often mutes the live cellular call.
  */
 class CallRecorder(private val context: Context) {
     data class StartResult(
@@ -52,11 +50,9 @@ class CallRecorder(private val context: Context) {
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val file = File(dir, "proto_$stamp.m4a")
 
-        // MIC first: keeps the cellular call audible on most devices.
-        // VOICE_COMMUNICATION often takes the call audio path and mutes the live call.
+        // MIC only — VOICE_COMMUNICATION frequently mutes the live call.
         val sources = listOf(
             Pair("MIC", MediaRecorder.AudioSource.MIC),
-            Pair("VOICE_COMMUNICATION", MediaRecorder.AudioSource.VOICE_COMMUNICATION),
         )
 
         var lastError: String? = null
