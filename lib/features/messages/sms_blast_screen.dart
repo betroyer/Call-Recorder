@@ -378,7 +378,7 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
             '${_scheduledAt!.minute.toString().padLeft(2, '0')}';
 
     final simItems = _sims.isEmpty
-        ? [const DropdownMenuItem(value: -1, child: Text('ALL SIMs'))]
+        ? [const DropdownMenuItem(value: -1, child: Text('Auto — try SIM with load'))]
         : _sims
             .map(
               (s) => DropdownMenuItem(

@@ -60,7 +60,26 @@ object SmsSentWaiters {
             "Send failed (null PDU)."
         SmsManager.RESULT_ERROR_RADIO_OFF ->
             "Radio/airplane mode is off — turn on mobile network."
-        else -> "Send failed (code $resultCode). Check SIM credit and signal."
+        SmsManager.RESULT_ERROR_LIMIT_EXCEEDED ->
+            "Too many SMS queued — wait a moment and try again."
+        SmsManager.RESULT_ERROR_FDN_CHECK_FAILURE ->
+            "Blocked by Fixed Dialing Numbers (FDN) on this SIM."
+        // RESULT_MODEM_ERROR = 16 (API 30+)
+        16 ->
+            "Modem error (code 16). Try: pick the correct SIM in Message, " +
+                "toggle Airplane mode, end any call, then retry. " +
+                "Also set CallVault as default SMS app."
+        // RESULT_NETWORK_ERROR = 17
+        17 ->
+            "Network rejected the SMS (code 17). Check signal and try again."
+        // RESULT_INVALID_SMSC_ADDRESS = 19
+        19 ->
+            "Invalid SMS center (SMSC) on this SIM — contact your carrier."
+        // RESULT_NO_DEFAULT_SMS_APP = 32 / varies — also map common RIL
+        32 ->
+            "No default SMS app — set CallVault as the default SMS app."
+        else ->
+            "Send failed (code $resultCode). Check SIM, signal, correct SIM slot, and default SMS app."
     }
 }
 

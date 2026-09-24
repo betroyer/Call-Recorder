@@ -50,6 +50,10 @@ class _ComposeScreenState extends State<ComposeScreen> {
     try {
       _sims = await CallBridge.listSims();
       _conversations = await CallBridge.listSmsConversations();
+      // Keep Auto (-1) so native code tries the SIM that last worked / has load.
+      if (_sims.every((s) => (s['id'] as num?)?.toInt() != _subscriptionId)) {
+        _subscriptionId = -1;
+      }
     } catch (_) {}
     if (mounted) setState(() {});
   }
@@ -91,8 +95,16 @@ class _ComposeScreenState extends State<ComposeScreen> {
       );
       if (!mounted) return;
       if (result['ok'] == true) {
+        final sub = result['subscriptionId'];
+        final auto = result['autoSelected'] == true;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Message sent — also in Inbox')),
+          SnackBar(
+            content: Text(
+              auto && sub != null
+                  ? 'Sent via SIM $sub (auto-picked for load)'
+                  : 'Message sent — also in Inbox',
+            ),
+          ),
         );
         _body.clear();
         await _bootstrap();
@@ -159,9 +171,10 @@ class _ComposeScreenState extends State<ComposeScreen> {
         const SizedBox(height: 8),
         InputDecorator(
           decoration: const InputDecoration(
-            labelText: 'Send via',
+            labelText: 'Send via SIM (pick the one with load)',
             border: OutlineInputBorder(),
             contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            helperText: 'Auto tries the last working SIM, then the other slot',
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<int>(

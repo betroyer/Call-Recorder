@@ -41,7 +41,17 @@ class SmsHelper(private val activity: Activity) {
 
     fun listSims(): List<Map<String, Any?>> {
         val result = mutableListOf<Map<String, Any?>>()
-        result.add(mapOf("id" to -1, "label" to "ALL SIMs", "slot" to -1))
+        val lastOk = lastSuccessfulSmsSubId()
+        val defaultSms = defaultSmsSubscriptionId()
+        result.add(
+            mapOf(
+                "id" to -1,
+                "label" to "Auto — try SIM with load",
+                "slot" to -1,
+                "preferred" to true,
+                "hint" to "Uses last working SIM, then SMS-default, then others",
+            ),
+        )
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP_MR1) return result
         val sm = activity.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as? SubscriptionManager
             ?: return result
@@ -55,18 +65,96 @@ class SmsHelper(private val activity: Activity) {
             null
         }
         list?.forEach { info ->
-            val label = info.displayName?.toString()?.ifBlank { "SIM ${info.simSlotIndex + 1}" }
-                ?: "SIM ${info.simSlotIndex + 1}"
+            val slot = info.simSlotIndex + 1
+            val name = info.displayName?.toString()?.ifBlank { null }
+                ?: info.carrierName?.toString()?.ifBlank { null }
+                ?: "SIM $slot"
+            val tags = mutableListOf<String>()
+            if (info.subscriptionId == defaultSms) tags.add("SMS default")
+            if (info.subscriptionId == lastOk) tags.add("has load / last OK")
+            val number = info.number?.takeIf { it.isNotBlank() }
+            val label = buildString {
+                append("SIM $slot · $name")
+                if (number != null) append(" · $number")
+                if (tags.isNotEmpty()) append(" (${tags.joinToString(", ")})")
+            }
             result.add(
                 mapOf(
                     "id" to info.subscriptionId,
                     "label" to label,
                     "slot" to info.simSlotIndex,
-                    "number" to info.number,
+                    "number" to number,
+                    "carrier" to (info.carrierName?.toString() ?: ""),
+                    "isDefaultSms" to (info.subscriptionId == defaultSms),
+                    "lastSuccessful" to (info.subscriptionId == lastOk),
                 ),
             )
         }
         return result
+    }
+
+    private fun defaultSmsSubscriptionId(): Int {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                SubscriptionManager.getDefaultSmsSubscriptionId()
+            } else {
+                -1
+            }
+        } catch (_: Exception) {
+            -1
+        }
+    }
+
+    private fun lastSuccessfulSmsSubId(): Int {
+        return activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_LAST_SMS_SUB, -1)
+    }
+
+    private fun rememberSuccessfulSmsSubId(subscriptionId: Int) {
+        if (subscriptionId < 0) return
+        activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(KEY_LAST_SMS_SUB, subscriptionId)
+            .apply()
+    }
+
+    /** Order of SIMs to try when Auto is selected (or for failover). */
+    private fun subscriptionTryOrder(preferredId: Int): List<Int> {
+        val active = activeSubscriptionIds()
+        if (active.isEmpty()) {
+            return if (preferredId >= 0) listOf(preferredId) else listOf(-1)
+        }
+        val ordered = linkedSetOf<Int>()
+        if (preferredId >= 0 && active.contains(preferredId)) {
+            ordered.add(preferredId)
+        } else {
+            val lastOk = lastSuccessfulSmsSubId()
+            if (lastOk >= 0 && active.contains(lastOk)) ordered.add(lastOk)
+            val defSms = defaultSmsSubscriptionId()
+            if (defSms >= 0 && active.contains(defSms)) ordered.add(defSms)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    val dataId = SubscriptionManager.getDefaultDataSubscriptionId()
+                    if (dataId >= 0 && active.contains(dataId)) ordered.add(dataId)
+                }
+            } catch (_: Exception) {
+            }
+        }
+        active.forEach { ordered.add(it) }
+        return ordered.toList()
+    }
+
+    private fun shouldRetryOnOtherSim(resultCode: Int): Boolean {
+        // Modem / network / no-service failures often mean the wrong SIM (no load).
+        return when (resultCode) {
+            SmsManager.RESULT_ERROR_GENERIC_FAILURE,
+            SmsManager.RESULT_ERROR_NO_SERVICE,
+            SmsManager.RESULT_ERROR_RADIO_OFF,
+            16, // RESULT_MODEM_ERROR
+            17, // RESULT_NETWORK_ERROR
+            -> true
+            else -> resultCode in 100..130 // many RESULT_RIL_* codes
+        }
     }
 
     fun isDefaultSmsApp(): Boolean {
@@ -402,6 +490,69 @@ class SmsHelper(private val activity: Activity) {
                 "address" to address,
             )
         }
+
+        // Explicit SIM: try only that one. Auto (-1): try last-OK / SMS-default / others.
+        val tryOrder = if (subscriptionId >= 0) {
+            listOf(subscriptionId)
+        } else {
+            subscriptionTryOrder(-1)
+        }
+
+        var lastFailure: Map<String, Any?> = mapOf(
+            "ok" to false,
+            "status" to "failed",
+            "error" to "No SIM available to send",
+            "address" to normalized,
+        )
+        val attempts = mutableListOf<Map<String, Any?>>()
+
+        for ((index, subId) in tryOrder.withIndex()) {
+            val attempt = sendSmsOnSubscription(normalized, body, subId)
+            attempts.add(attempt)
+            if (attempt["ok"] == true) {
+                rememberSuccessfulSmsSubId(subId)
+                return attempt + mapOf(
+                    "triedSims" to attempts.size,
+                    "autoSelected" to (subscriptionId < 0),
+                )
+            }
+            lastFailure = attempt
+            val code = (attempt["resultCode"] as? Number)?.toInt() ?: -1
+            val moreSims = index < tryOrder.lastIndex
+            if (!moreSims || !shouldRetryOnOtherSim(code)) {
+                break
+            }
+            try {
+                Thread.sleep(350)
+            } catch (_: InterruptedException) {
+            }
+        }
+
+        val err = lastFailure["error"]?.toString() ?: "Send failed on all SIMs"
+        val hint = if (tryOrder.size > 1) {
+            " Tried ${attempts.size} SIM(s). Pick the SIM with load under Send via."
+        } else {
+            " Select the SIM with load under Send via."
+        }
+        SmsEventHub.emit(
+            mapOf(
+                "type" to "onSmsChanged",
+                "reason" to "send_failed",
+                "address" to normalized,
+                "error" to err,
+            ),
+        )
+        return lastFailure + mapOf(
+            "error" to (err + hint),
+            "attempts" to attempts.size,
+        )
+    }
+
+    private fun sendSmsOnSubscription(
+        normalized: String,
+        body: String,
+        subscriptionId: Int,
+    ): Map<String, Any?> {
         return try {
             val sms = smsManagerFor(subscriptionId)
             val code = requestCode.incrementAndGet()
@@ -449,24 +600,15 @@ class SmsHelper(private val activity: Activity) {
                 sms.sendTextMessage(normalized, null, body, sentIntents[0], delIntents[0])
             }
 
-            // Wait off-main (bridge already uses a worker thread) for carrier accept.
             val resultCode = SmsSentWaiters.awaitSent(code)
             if (resultCode != android.app.Activity.RESULT_OK) {
-                val err = SmsSentWaiters.sentErrorMessage(resultCode)
-                SmsEventHub.emit(
-                    mapOf(
-                        "type" to "onSmsChanged",
-                        "reason" to "send_failed",
-                        "address" to normalized,
-                        "error" to err,
-                    ),
-                )
                 return mapOf(
                     "ok" to false,
                     "status" to "failed",
-                    "error" to err,
+                    "error" to SmsSentWaiters.sentErrorMessage(resultCode),
                     "address" to normalized,
                     "resultCode" to resultCode,
+                    "subscriptionId" to subscriptionId,
                 )
             }
 
@@ -478,6 +620,7 @@ class SmsHelper(private val activity: Activity) {
                     "address" to normalized,
                     "body" to body,
                     "dateMs" to System.currentTimeMillis(),
+                    "subscriptionId" to subscriptionId,
                 ),
             )
             mapOf(
@@ -492,7 +635,9 @@ class SmsHelper(private val activity: Activity) {
                 "ok" to false,
                 "status" to "failed",
                 "error" to (e.message ?: "send failed"),
-                "address" to PhoneNormalizer.normalize(address),
+                "address" to normalized,
+                "subscriptionId" to subscriptionId,
+                "resultCode" to SmsManager.RESULT_ERROR_GENERIC_FAILURE,
             )
         }
     }
@@ -765,6 +910,7 @@ class SmsHelper(private val activity: Activity) {
         private val cancelFlag = AtomicBoolean(false)
         const val PREFS = "callvault_sms"
         const val KEY_SCHEDULED = "scheduled_blasts"
+        const val KEY_LAST_SMS_SUB = "last_successful_sms_sub"
         const val ACTION_SMS_SENT = "com.callvault.prototype.SMS_SENT"
         const val ACTION_SMS_DELIVERED = "com.callvault.prototype.SMS_DELIVERED"
         const val ACTION_SCHEDULED_BLAST = "com.callvault.prototype.SCHEDULED_BLAST"
