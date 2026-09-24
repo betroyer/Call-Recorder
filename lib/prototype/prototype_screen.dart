@@ -4,6 +4,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 
 import '../bridge/call_bridge.dart';
+import 'playback_modal.dart';
 
 class PrototypeScreen extends StatefulWidget {
   const PrototypeScreen({super.key});
@@ -207,11 +208,19 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
       setState(() => _lastError = 'No recording file to play');
       return;
     }
+    if (!mounted) return;
+    final name = path.split(RegExp(r'[/\\]')).last;
     try {
-      await _player.stop();
-      await _player.play(DeviceFileSource(path));
+      await showRecordingPlaybackModal(
+        context,
+        path: path,
+        title: name,
+        player: _player,
+      );
     } catch (e) {
-      setState(() => _lastError = 'Playback failed: $e');
+      if (mounted) {
+        setState(() => _lastError = 'Playback failed: $e');
+      }
     }
   }
 
