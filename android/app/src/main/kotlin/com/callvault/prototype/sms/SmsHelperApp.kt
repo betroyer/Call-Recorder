@@ -44,7 +44,7 @@ class SmsHelperApp(private val context: Context) {
             val code = requestCode.incrementAndGet()
             val parts = sms.divideMessage(body)
             val partCount = if (parts != null && parts.size > 1) parts.size else 1
-            SmsStatusReceiver.Waiters.armSent(code, partCount)
+            SmsSentWaiters.armSent(code, partCount)
 
             val sentIntents = ArrayList<PendingIntent>(partCount)
             val delIntents = ArrayList<PendingIntent>(partCount)
@@ -83,12 +83,12 @@ class SmsHelperApp(private val context: Context) {
                 sms.sendTextMessage(normalized, null, body, sentIntents[0], delIntents[0])
             }
 
-            val resultCode = SmsStatusReceiver.Waiters.awaitSent(code)
+            val resultCode = SmsSentWaiters.awaitSent(code)
             if (resultCode != Activity.RESULT_OK) {
                 return mapOf(
                     "ok" to false,
                     "status" to "failed",
-                    "error" to SmsStatusReceiver.Waiters.sentErrorMessage(resultCode),
+                    "error" to SmsSentWaiters.sentErrorMessage(resultCode),
                     "address" to normalized,
                     "resultCode" to resultCode,
                 )

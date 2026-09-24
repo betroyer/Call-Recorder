@@ -407,8 +407,8 @@ class SmsHelper(private val activity: Activity) {
             val code = requestCode.incrementAndGet()
             val parts = sms.divideMessage(body)
             val partCount = if (parts != null && parts.size > 1) parts.size else 1
-            SmsStatusReceiver.Waiters.armSent(code, partCount)
-            SmsStatusReceiver.Waiters.armDelivered(code)
+            SmsSentWaiters.armSent(code, partCount)
+            SmsSentWaiters.armDelivered(code)
 
             val sentIntents = ArrayList<PendingIntent>(partCount)
             val delIntents = ArrayList<PendingIntent>(partCount)
@@ -450,9 +450,9 @@ class SmsHelper(private val activity: Activity) {
             }
 
             // Wait off-main (bridge already uses a worker thread) for carrier accept.
-            val resultCode = SmsStatusReceiver.Waiters.awaitSent(code)
+            val resultCode = SmsSentWaiters.awaitSent(code)
             if (resultCode != android.app.Activity.RESULT_OK) {
-                val err = SmsStatusReceiver.Waiters.sentErrorMessage(resultCode)
+                val err = SmsSentWaiters.sentErrorMessage(resultCode)
                 SmsEventHub.emit(
                     mapOf(
                         "type" to "onSmsChanged",
