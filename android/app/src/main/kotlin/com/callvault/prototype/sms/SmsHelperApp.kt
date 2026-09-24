@@ -1,28 +1,25 @@
 package com.callvault.prototype.sms
 
-import android.Manifest
 import android.app.Activity
 import android.app.PendingIntent
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.database.Cursor
 import android.net.Uri
 import android.os.Build
-import android.provider.ContactsContract
 import android.provider.Telephony
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
 import androidx.core.content.ContextCompat
-import java.util.concurrent.atomic.AtomicBoolean
+import android.Manifest
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Context-based SMS sender used by [ScheduledBlastReceiver] (no Activity).
  */
 class SmsHelperApp(private val context: Context) {
-    private val cancelFlag = AtomicBoolean(false)
+    private val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
 
     fun cancelBlast() {
         cancelFlag.set(true)
@@ -38,44 +35,76 @@ class SmsHelperApp(private val context: Context) {
         ) {
             return mapOf("ok" to false, "status" to "failed", "error" to "SEND_SMS permission required", "address" to address)
         }
+        val normalized = PhoneNormalizer.normalize(address)
+        if (normalized.isBlank() || body.isBlank()) {
+            return mapOf("ok" to false, "status" to "failed", "error" to "Address and body required", "address" to address)
+        }
         return try {
             val sms = smsManagerFor(subscriptionId)
             val code = requestCode.incrementAndGet()
-            val sent = PendingIntent.getBroadcast(
-                context,
-                code,
-                Intent(SmsHelper.ACTION_SMS_SENT).putExtra("address", address),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-            val delivered = PendingIntent.getBroadcast(
-                context,
-                code + 100000,
-                Intent(SmsHelper.ACTION_SMS_DELIVERED).putExtra("address", address),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
             val parts = sms.divideMessage(body)
-            if (parts != null && parts.size > 1) {
-                val sentIntents = ArrayList<PendingIntent>()
-                val delIntents = ArrayList<PendingIntent>()
-                repeat(parts.size) {
-                    sentIntents.add(sent)
-                    delIntents.add(delivered)
+            val partCount = if (parts != null && parts.size > 1) parts.size else 1
+            SmsStatusReceiver.Waiters.armSent(code, partCount)
+
+            val sentIntents = ArrayList<PendingIntent>(partCount)
+            val delIntents = ArrayList<PendingIntent>(partCount)
+            repeat(partCount) { index ->
+                val sentIntent = Intent(SmsHelper.ACTION_SMS_SENT).apply {
+                    setPackage(context.packageName)
+                    putExtra("address", normalized)
+                    putExtra(SmsStatusReceiver.EXTRA_REQUEST_CODE, code)
                 }
-                sms.sendMultipartTextMessage(address, null, parts, sentIntents, delIntents)
-            } else {
-                sms.sendTextMessage(address, null, body, sent, delivered)
+                val delIntent = Intent(SmsHelper.ACTION_SMS_DELIVERED).apply {
+                    setPackage(context.packageName)
+                    putExtra("address", normalized)
+                    putExtra(SmsStatusReceiver.EXTRA_REQUEST_CODE, code)
+                }
+                sentIntents.add(
+                    PendingIntent.getBroadcast(
+                        context,
+                        code * 10 + index,
+                        sentIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                    ),
+                )
+                delIntents.add(
+                    PendingIntent.getBroadcast(
+                        context,
+                        code * 10 + index + 500_000,
+                        delIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                    ),
+                )
             }
-            writeToSentBox(address, body)
+
+            if (partCount > 1 && parts != null) {
+                sms.sendMultipartTextMessage(normalized, null, parts, sentIntents, delIntents)
+            } else {
+                sms.sendTextMessage(normalized, null, body, sentIntents[0], delIntents[0])
+            }
+
+            val resultCode = SmsStatusReceiver.Waiters.awaitSent(code)
+            if (resultCode != Activity.RESULT_OK) {
+                return mapOf(
+                    "ok" to false,
+                    "status" to "failed",
+                    "error" to SmsStatusReceiver.Waiters.sentErrorMessage(resultCode),
+                    "address" to normalized,
+                    "resultCode" to resultCode,
+                )
+            }
+
+            writeToSentBox(normalized, body)
             SmsEventHub.emit(
                 mapOf(
                     "type" to "onSmsChanged",
                     "reason" to "sent",
-                    "address" to address,
+                    "address" to normalized,
                     "body" to body,
                     "dateMs" to System.currentTimeMillis(),
                 ),
             )
-            mapOf("ok" to true, "status" to "sent", "address" to address, "subscriptionId" to subscriptionId)
+            mapOf("ok" to true, "status" to "sent", "address" to normalized, "subscriptionId" to subscriptionId)
         } catch (e: Exception) {
             mapOf("ok" to false, "status" to "failed", "error" to (e.message ?: "send failed"), "address" to address)
         }
@@ -89,7 +118,7 @@ class SmsHelperApp(private val context: Context) {
         blastId: String? = null,
     ): Map<String, Any?> {
         cancelFlag.set(false)
-        val cleaned = addresses.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        val cleaned = addresses.map { PhoneNormalizer.normalize(it) }.filter { it.isNotEmpty() }.distinct()
         val simIds = activeSubscriptionIds()
         var sent = 0
         var failed = 0
@@ -161,10 +190,13 @@ class SmsHelperApp(private val context: Context) {
                 put(Telephony.Sms.ADDRESS, address)
                 put(Telephony.Sms.BODY, body)
                 put(Telephony.Sms.DATE, System.currentTimeMillis())
+                put(Telephony.Sms.DATE_SENT, System.currentTimeMillis())
                 put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT)
                 put(Telephony.Sms.READ, 1)
+                put(Telephony.Sms.SEEN, 1)
             }
-            context.contentResolver.insert(Uri.parse("content://sms/sent"), values)
+            context.contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
+                ?: context.contentResolver.insert(Uri.parse("content://sms/sent"), values)
         } catch (_: Exception) {
         }
     }

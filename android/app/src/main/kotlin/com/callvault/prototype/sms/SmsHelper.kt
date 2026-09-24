@@ -270,21 +270,22 @@ class SmsHelper(private val activity: Activity) {
             null
         } ?: return emptyList()
 
-        val byAddress = linkedMapOf<String, MutableMap<String, Any?>>()
-        val unreadByAddress = mutableMapOf<String, Int>()
+        val byKey = linkedMapOf<String, MutableMap<String, Any?>>()
+        val unreadByKey = mutableMapOf<String, Int>()
         cursor.use {
             while (it.moveToNext()) {
                 val address = it.getString(1)?.trim().orEmpty()
                 if (address.isEmpty()) continue
+                val key = conversationKey(address)
                 val type = it.getInt(4)
                 val read = it.getInt(5) == 1
                 if (type == Telephony.Sms.MESSAGE_TYPE_INBOX && !read) {
-                    unreadByAddress[address] = (unreadByAddress[address] ?: 0) + 1
+                    unreadByKey[key] = (unreadByKey[key] ?: 0) + 1
                 }
-                if (!byAddress.containsKey(address) && byAddress.size < limit) {
-                    byAddress[address] = mutableMapOf(
+                if (!byKey.containsKey(key) && byKey.size < limit) {
+                    byKey[key] = mutableMapOf(
                         "id" to it.getLong(0),
-                        "address" to address,
+                        "address" to PhoneNormalizer.normalize(address),
                         "body" to (it.getString(2) ?: ""),
                         "dateMs" to it.getLong(3),
                         "type" to when (type) {
@@ -296,17 +297,25 @@ class SmsHelper(private val activity: Activity) {
                 }
             }
         }
-        return byAddress.map { (address, row) ->
-            val unread = unreadByAddress[address] ?: 0
+        return byKey.map { (key, row) ->
+            val unread = unreadByKey[key] ?: 0
             row["unreadCount"] = unread
             row["read"] = unread == 0
             row
         }
     }
 
+    private fun conversationKey(address: String): String {
+        val digits = PhoneNormalizer.normalize(address).filter { it.isDigit() }
+        return if (digits.length >= 10) digits.takeLast(10) else digits.ifEmpty { address.trim() }
+    }
+
     fun threadMessages(address: String, limit: Int = 200): List<Map<String, Any?>> {
         if (!hasReadPermission()) return emptyList()
+        val variants = addressVariants(address)
+        if (variants.isEmpty()) return emptyList()
         val items = mutableListOf<Map<String, Any?>>()
+        val placeholders = variants.joinToString(",") { "?" }
         val cursor = try {
             activity.contentResolver.query(
                 Telephony.Sms.CONTENT_URI,
@@ -317,8 +326,8 @@ class SmsHelper(private val activity: Activity) {
                     Telephony.Sms.DATE,
                     Telephony.Sms.TYPE,
                 ),
-                "${Telephony.Sms.ADDRESS}=?",
-                arrayOf(address),
+                "${Telephony.Sms.ADDRESS} IN ($placeholders)",
+                variants.toTypedArray(),
                 "${Telephony.Sms.DATE} ASC",
             )
         } catch (_: SecurityException) {
@@ -347,6 +356,30 @@ class SmsHelper(private val activity: Activity) {
         return items
     }
 
+    private fun addressVariants(raw: String): List<String> {
+        val trimmed = raw.trim()
+        val normalized = PhoneNormalizer.normalize(trimmed)
+        val digits = normalized.filter { it.isDigit() }
+        val set = linkedSetOf<String>()
+        if (trimmed.isNotEmpty()) set.add(trimmed)
+        if (normalized.isNotEmpty()) set.add(normalized)
+        if (digits.isNotEmpty()) set.add(digits)
+        if (digits.length == 12 && digits.startsWith("63")) {
+            set.add("0${digits.substring(2)}")
+            set.add("+$digits")
+        }
+        if (digits.length == 11 && digits.startsWith("09")) {
+            set.add("+63${digits.substring(1)}")
+            set.add("63${digits.substring(1)}")
+        }
+        if (digits.length == 10 && digits.startsWith("9")) {
+            set.add("0$digits")
+            set.add("+63$digits")
+            set.add("63$digits")
+        }
+        return set.filter { it.isNotEmpty() }.toList()
+    }
+
     fun sendSms(
         address: String,
         body: String,
@@ -360,7 +393,8 @@ class SmsHelper(private val activity: Activity) {
                 "address" to address,
             )
         }
-        if (address.isBlank() || body.isBlank()) {
+        val normalized = PhoneNormalizer.normalize(address)
+        if (normalized.isBlank() || body.isBlank()) {
             return mapOf(
                 "ok" to false,
                 "status" to "failed",
@@ -371,36 +405,77 @@ class SmsHelper(private val activity: Activity) {
         return try {
             val sms = smsManagerFor(subscriptionId)
             val code = requestCode.incrementAndGet()
-            val sent = PendingIntent.getBroadcast(
-                activity,
-                code,
-                Intent(ACTION_SMS_SENT).putExtra("address", address),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-            val delivered = PendingIntent.getBroadcast(
-                activity,
-                code + 100000,
-                Intent(ACTION_SMS_DELIVERED).putExtra("address", address),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
             val parts = sms.divideMessage(body)
-            if (parts != null && parts.size > 1) {
-                val sentIntents = ArrayList<PendingIntent>()
-                val delIntents = ArrayList<PendingIntent>()
-                repeat(parts.size) {
-                    sentIntents.add(sent)
-                    delIntents.add(delivered)
+            val partCount = if (parts != null && parts.size > 1) parts.size else 1
+            SmsStatusReceiver.Waiters.armSent(code, partCount)
+            SmsStatusReceiver.Waiters.armDelivered(code)
+
+            val sentIntents = ArrayList<PendingIntent>(partCount)
+            val delIntents = ArrayList<PendingIntent>(partCount)
+            repeat(partCount) { index ->
+                val sentIntent = Intent(ACTION_SMS_SENT).apply {
+                    setPackage(activity.packageName)
+                    putExtra("address", normalized)
+                    putExtra(SmsStatusReceiver.EXTRA_REQUEST_CODE, code)
+                    putExtra("partIndex", index)
                 }
-                sms.sendMultipartTextMessage(address, null, parts, sentIntents, delIntents)
-            } else {
-                sms.sendTextMessage(address, null, body, sent, delivered)
+                val delIntent = Intent(ACTION_SMS_DELIVERED).apply {
+                    setPackage(activity.packageName)
+                    putExtra("address", normalized)
+                    putExtra(SmsStatusReceiver.EXTRA_REQUEST_CODE, code)
+                    putExtra("partIndex", index)
+                }
+                sentIntents.add(
+                    PendingIntent.getBroadcast(
+                        activity,
+                        code * 10 + index,
+                        sentIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                    ),
+                )
+                delIntents.add(
+                    PendingIntent.getBroadcast(
+                        activity,
+                        code * 10 + index + 500_000,
+                        delIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                    ),
+                )
             }
-            writeToSentBox(address, body)
+
+            if (partCount > 1 && parts != null) {
+                sms.sendMultipartTextMessage(normalized, null, parts, sentIntents, delIntents)
+            } else {
+                sms.sendTextMessage(normalized, null, body, sentIntents[0], delIntents[0])
+            }
+
+            // Wait off-main (bridge already uses a worker thread) for carrier accept.
+            val resultCode = SmsStatusReceiver.Waiters.awaitSent(code)
+            if (resultCode != android.app.Activity.RESULT_OK) {
+                val err = SmsStatusReceiver.Waiters.sentErrorMessage(resultCode)
+                SmsEventHub.emit(
+                    mapOf(
+                        "type" to "onSmsChanged",
+                        "reason" to "send_failed",
+                        "address" to normalized,
+                        "error" to err,
+                    ),
+                )
+                return mapOf(
+                    "ok" to false,
+                    "status" to "failed",
+                    "error" to err,
+                    "address" to normalized,
+                    "resultCode" to resultCode,
+                )
+            }
+
+            writeToSentBox(normalized, body)
             SmsEventHub.emit(
                 mapOf(
                     "type" to "onSmsChanged",
                     "reason" to "sent",
-                    "address" to address,
+                    "address" to normalized,
                     "body" to body,
                     "dateMs" to System.currentTimeMillis(),
                 ),
@@ -408,7 +483,7 @@ class SmsHelper(private val activity: Activity) {
             mapOf(
                 "ok" to true,
                 "status" to "sent",
-                "address" to address,
+                "address" to normalized,
                 "subscriptionId" to subscriptionId,
                 "error" to null,
             )
@@ -417,7 +492,7 @@ class SmsHelper(private val activity: Activity) {
                 "ok" to false,
                 "status" to "failed",
                 "error" to (e.message ?: "send failed"),
-                "address" to address,
+                "address" to PhoneNormalizer.normalize(address),
             )
         }
     }
@@ -445,7 +520,7 @@ class SmsHelper(private val activity: Activity) {
                 "results" to emptyList<Map<String, Any?>>(),
             )
         }
-        val cleaned = addresses.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        val cleaned = addresses.map { PhoneNormalizer.normalize(it) }.filter { it.isNotEmpty() }.distinct()
         if (cleaned.isEmpty()) {
             return mapOf(
                 "ok" to false,

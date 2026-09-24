@@ -136,9 +136,10 @@ class _ComposeScreenState extends State<ComposeScreen> {
         TextField(
           controller: _to,
           keyboardType: TextInputType.phone,
-          decoration: const InputDecoration(
+                      decoration: const InputDecoration(
             labelText: 'To',
-            hintText: '0917…',
+            hintText: '0917… or +63917…',
+            helperText: 'Spaces are OK — number is cleaned before send',
             border: OutlineInputBorder(),
           ),
         ),

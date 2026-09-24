@@ -53,6 +53,15 @@
             android:foregroundServiceType="microphone" />
 
         <receiver
+            android:name=".sms.SmsStatusReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.callvault.prototype.SMS_SENT" />
+                <action android:name="com.callvault.prototype.SMS_DELIVERED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
             android:name=".sms.ScheduledBlastReceiver"
             android:exported="false">
             <intent-filter>
