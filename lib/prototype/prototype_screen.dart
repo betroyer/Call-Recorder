@@ -7,7 +7,10 @@ import '../bridge/call_bridge.dart';
 import 'playback_modal.dart';
 
 class PrototypeScreen extends StatefulWidget {
-  const PrototypeScreen({super.key});
+  const PrototypeScreen({super.key, this.embedded = false});
+
+  /// When true, hide the local AppBar (used inside [AppShell]).
+  final bool embedded;
 
   @override
   State<PrototypeScreen> createState() => _PrototypeScreenState();
@@ -21,6 +24,8 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
     'microphone': false,
     'phone': false,
     'notifications': false,
+    'smsSend': false,
+    'smsRead': false,
   };
 
   String _callState = 'idle';
@@ -286,9 +291,11 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('CallVault Prototype'),
-      ),
+      appBar: widget.embedded
+          ? null
+          : AppBar(
+              title: const Text('CallVault Prototype'),
+            ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -309,6 +316,8 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
           _sectionTitle('Permissions'),
           _permRow('Microphone', _permissions['microphone'] == true),
           _permRow('Phone state', _permissions['phone'] == true),
+          _permRow('SMS send', _permissions['smsSend'] == true),
+          _permRow('SMS read', _permissions['smsRead'] == true),
           _permRow('Notifications', _permissions['notifications'] == true),
           const SizedBox(height: 8),
           Wrap(

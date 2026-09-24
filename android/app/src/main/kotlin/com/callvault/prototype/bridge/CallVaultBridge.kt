@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 import com.callvault.prototype.recorder.CallRecorder
 import com.callvault.prototype.recorder.RecordingService
 import com.callvault.prototype.shizuku.ShizukuRecorderClient
+import com.callvault.prototype.sms.SmsHelper
 import com.callvault.prototype.telecom.CallStateMonitor
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -43,6 +44,7 @@ class CallVaultBridge(
     private var useShizuku: Boolean = false
     private var activeMode: String = "none" // none | normal | shizuku
     private val shizukuClient by lazy { ShizukuRecorderClient(activity) }
+    private val smsHelper by lazy { SmsHelper(activity) }
 
     private val shizukuPermissionListener =
         Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
@@ -146,6 +148,39 @@ class CallVaultBridge(
             "stopRecording" -> stopRecording(result)
             "getLastRecordingPath" -> result.success(CallRecorder.lastRecordingPath(activity))
             "listRecordings" -> result.success(CallRecorder.listRecordings(activity))
+            "listSmsInbox" -> {
+                val limit = call.argument<Int>("limit") ?: 100
+                result.success(smsHelper.listInbox(limit))
+            }
+            "listSmsConversations" -> {
+                val limit = call.argument<Int>("limit") ?: 80
+                result.success(smsHelper.listConversations(limit))
+            }
+            "listSmsThread" -> {
+                val address = call.argument<String>("address") ?: ""
+                val limit = call.argument<Int>("limit") ?: 200
+                result.success(smsHelper.threadMessages(address, limit))
+            }
+            "listSims" -> result.success(smsHelper.listSims())
+            "sendSms" -> {
+                val address = call.argument<String>("address") ?: ""
+                val body = call.argument<String>("body") ?: ""
+                val subscriptionId = call.argument<Int>("subscriptionId") ?: -1
+                Thread {
+                    val payload = smsHelper.sendSms(address, body, subscriptionId)
+                    activity.runOnUiThread { result.success(payload) }
+                }.start()
+            }
+            "sendSmsBlast" -> {
+                val addresses = call.argument<List<String>>("addresses") ?: emptyList()
+                val body = call.argument<String>("body") ?: ""
+                val subscriptionId = call.argument<Int>("subscriptionId") ?: -1
+                val allSims = call.argument<Boolean>("allSims") == true
+                Thread {
+                    val payload = smsHelper.sendBlast(addresses, body, subscriptionId, allSims)
+                    activity.runOnUiThread { result.success(payload) }
+                }.start()
+            }
             else -> result.notImplemented()
         }
     }
@@ -304,6 +339,8 @@ class CallVaultBridge(
         val map = mutableMapOf(
             "microphone" to hasPermission(Manifest.permission.RECORD_AUDIO),
             "phone" to hasPermission(Manifest.permission.READ_PHONE_STATE),
+            "smsSend" to hasPermission(Manifest.permission.SEND_SMS),
+            "smsRead" to hasPermission(Manifest.permission.READ_SMS),
         )
         if (Build.VERSION.SDK_INT >= 33) {
             map["notifications"] = hasPermission(Manifest.permission.POST_NOTIFICATIONS)
@@ -317,6 +354,9 @@ class CallVaultBridge(
         val list = mutableListOf(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.READ_PHONE_STATE,
+            Manifest.permission.SEND_SMS,
+            Manifest.permission.READ_SMS,
+            Manifest.permission.RECEIVE_SMS,
         )
         if (Build.VERSION.SDK_INT >= 33) {
             list.add(Manifest.permission.POST_NOTIFICATIONS)

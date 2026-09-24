@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'prototype/prototype_screen.dart';
+import 'app_shell.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,12 +13,12 @@ class CallVaultPrototypeApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'CallVault Prototype',
+      title: 'CallVault',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1B4D3E)),
         useMaterial3: true,
       ),
-      home: const PrototypeScreen(),
+      home: const AppShell(),
     );
   }
 }

@@ -113,4 +113,74 @@ class CallBridge {
     final result = await _methods.invokeMethod<dynamic>('getUseShizuku');
     return (result as Map)['useShizuku'] == true;
   }
+
+  static Future<List<Map<String, dynamic>>> listSmsInbox({int limit = 100}) async {
+    final result = await _methods.invokeMethod<dynamic>('listSmsInbox', {'limit': limit});
+    if (result is! List) return const [];
+    return result
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> listSmsConversations({
+    int limit = 80,
+  }) async {
+    final result =
+        await _methods.invokeMethod<dynamic>('listSmsConversations', {'limit': limit});
+    if (result is! List) return const [];
+    return result
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> listSmsThread(String address) async {
+    final result = await _methods.invokeMethod<dynamic>('listSmsThread', {
+      'address': address,
+      'limit': 200,
+    });
+    if (result is! List) return const [];
+    return result
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> listSims() async {
+    final result = await _methods.invokeMethod<dynamic>('listSims');
+    if (result is! List) return const [];
+    return result
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  static Future<Map<String, dynamic>> sendSms({
+    required String address,
+    required String body,
+    int subscriptionId = -1,
+  }) async {
+    final result = await _methods.invokeMethod<dynamic>('sendSms', {
+      'address': address,
+      'body': body,
+      'subscriptionId': subscriptionId,
+    });
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  static Future<Map<String, dynamic>> sendSmsBlast({
+    required List<String> addresses,
+    required String body,
+    int subscriptionId = -1,
+    bool allSims = false,
+  }) async {
+    final result = await _methods.invokeMethod<dynamic>('sendSmsBlast', {
+      'addresses': addresses,
+      'body': body,
+      'subscriptionId': subscriptionId,
+      'allSims': allSims,
+    });
+    return Map<String, dynamic>.from(result as Map);
+  }
 }
