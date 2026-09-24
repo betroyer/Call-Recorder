@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../bridge/call_bridge.dart';
+import 'sms_permission_help.dart';
 import 'thread_screen.dart';
 
 class ComposeScreen extends StatefulWidget {
@@ -106,15 +107,8 @@ class _ComposeScreenState extends State<ComposeScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         if (!_smsSend)
-          Card(
-            child: ListTile(
-              title: const Text('SMS send permission needed'),
-              trailing: FilledButton(
-                onPressed: _request,
-                child: const Text('Grant'),
-              ),
-            ),
-          ),
+          SmsPermissionHelp(onRequest: _request),
+        if (!_smsSend) const SizedBox(height: 12),
         TextField(
           controller: _to,
           keyboardType: TextInputType.phone,

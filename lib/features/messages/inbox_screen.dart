@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../bridge/call_bridge.dart';
+import 'sms_permission_help.dart';
 import 'thread_screen.dart';
 
 class InboxScreen extends StatefulWidget {
@@ -77,24 +78,11 @@ class _InboxScreenState extends State<InboxScreen> {
       return const Center(child: CircularProgressIndicator());
     }
     if (!_smsRead) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'SMS read permission is required to show your inbox.',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: _requestSms,
-                child: const Text('Grant SMS permissions'),
-              ),
-            ],
-          ),
-        ),
+      return ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          SmsPermissionHelp(onRequest: _requestSms),
+        ],
       );
     }
     if (_error != null) {

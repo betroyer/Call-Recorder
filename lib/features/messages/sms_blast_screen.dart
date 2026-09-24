@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../bridge/call_bridge.dart';
+import 'sms_permission_help.dart';
 
 /// Multi-recipient SMS blast UI (numbers left, message + options right).
 class SmsBlastScreen extends StatefulWidget {
@@ -187,10 +188,7 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
         if (!_smsSend)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: OutlinedButton(
-              onPressed: _request,
-              child: const Text('Grant SMS permissions'),
-            ),
+            child: SmsPermissionHelp(onRequest: _request),
           ),
         Expanded(
           child: TextField(
