@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../bridge/call_bridge.dart';
 import '../features/messages/inbox_screen.dart';
 import '../features/messages/compose_screen.dart';
 import '../features/messages/sms_blast_screen.dart';
@@ -16,6 +17,12 @@ class _AppShellState extends State<AppShell> {
   int _index = 0;
 
   static const _titles = ['Record', 'Inbox', 'Message', 'SMS Blast'];
+
+  @override
+  void initState() {
+    super.initState();
+    CallBridge.listen();
+  }
 
   @override
   Widget build(BuildContext context) {

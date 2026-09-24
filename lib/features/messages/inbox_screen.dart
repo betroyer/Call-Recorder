@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../bridge/call_bridge.dart';
@@ -16,26 +18,45 @@ class _InboxScreenState extends State<InboxScreen> {
   bool _loading = true;
   String? _error;
   bool _smsRead = false;
+  bool _defaultSms = false;
+  StreamSubscription<Map<String, dynamic>>? _eventsSub;
 
   @override
   void initState() {
     super.initState();
+    CallBridge.listen();
+    _eventsSub = CallBridge.events.listen((e) {
+      if (e['type'] == 'onSmsChanged') {
+        _load(silent: true);
+      }
+    });
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  @override
+  void dispose() {
+    _eventsSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final perms = await CallBridge.checkPermissions();
       _smsRead = perms['smsRead'] == true;
+      _defaultSms = perms['defaultSms'] == true;
       if (!_smsRead) {
-        setState(() {
-          _loading = false;
-          _items = const [];
-        });
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _items = const [];
+          });
+        }
         return;
       }
       final list = await CallBridge.listSmsInbox();
@@ -103,6 +124,23 @@ class _InboxScreenState extends State<InboxScreen> {
     return '${dt.month}/${dt.day}';
   }
 
+  Widget _defaultSmsBanner() {
+    return ListTile(
+      tileColor: Theme.of(context).colorScheme.secondaryContainer,
+      leading: const Icon(Icons.sms_outlined),
+      title: const Text(
+        'For reliable incoming customer SMS, set CallVault as the default SMS app.',
+      ),
+      trailing: TextButton(
+        onPressed: () async {
+          await CallBridge.requestDefaultSmsRole();
+          await _load(silent: true);
+        },
+        child: const Text('Set'),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -121,11 +159,19 @@ class _InboxScreenState extends State<InboxScreen> {
     }
     if (_items.isEmpty) {
       return RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: () => _load(),
         child: ListView(
-          children: const [
-            SizedBox(height: 120),
-            Center(child: Text('No inbox messages yet.')),
+          children: [
+            if (!_defaultSms) _defaultSmsBanner(),
+            const SizedBox(height: 120),
+            const Center(child: Text('No inbox messages yet.')),
+            const SizedBox(height: 8),
+            const Center(
+              child: Text(
+                'Customer replies appear here when SMS arrives.',
+                textAlign: TextAlign.center,
+              ),
+            ),
           ],
         ),
       );
@@ -133,12 +179,15 @@ class _InboxScreenState extends State<InboxScreen> {
 
     final theme = Theme.of(context);
     return RefreshIndicator(
-      onRefresh: _load,
+      onRefresh: () => _load(),
       child: ListView.separated(
-        itemCount: _items.length,
+        itemCount: _items.length + (_defaultSms ? 0 : 1),
         separatorBuilder: (_, _) => const Divider(height: 1),
         itemBuilder: (context, index) {
-          final m = _items[index];
+          if (!_defaultSms && index == 0) {
+            return _defaultSmsBanner();
+          }
+          final m = _items[_defaultSms ? index : index - 1];
           final address = m['address']?.toString() ?? '';
           final body = m['body']?.toString() ?? '';
           final isRead = m['read'] == true;

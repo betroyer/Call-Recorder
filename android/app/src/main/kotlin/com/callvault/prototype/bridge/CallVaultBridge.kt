@@ -12,7 +12,10 @@ import androidx.core.content.ContextCompat
 import com.callvault.prototype.recorder.CallRecorder
 import com.callvault.prototype.recorder.RecordingService
 import com.callvault.prototype.shizuku.ShizukuRecorderClient
+import com.callvault.prototype.sms.SmsContentObserver
+import com.callvault.prototype.sms.SmsEventHub
 import com.callvault.prototype.sms.SmsHelper
+import com.callvault.prototype.sms.SmsNotificationHelper
 import com.callvault.prototype.telecom.CallStateMonitor
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -45,6 +48,7 @@ class CallVaultBridge(
     private var activeMode: String = "none" // none | normal | shizuku
     private val shizukuClient by lazy { ShizukuRecorderClient(activity) }
     private val smsHelper by lazy { SmsHelper(activity) }
+    private var smsObserver: SmsContentObserver? = null
 
     private val shizukuPermissionListener =
         Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
@@ -63,6 +67,16 @@ class CallVaultBridge(
         methodChannel.setMethodCallHandler(this)
         eventChannel.setStreamHandler(this)
         RecordingService.addListener(this)
+        SmsNotificationHelper.ensureChannel(activity)
+        SmsEventHub.listener = { payload -> emit(payload) }
+        smsObserver = SmsContentObserver(activity) {
+            emit(
+                mapOf(
+                    "type" to "onSmsChanged",
+                    "reason" to it,
+                ),
+            )
+        }.also { it.start() }
         try {
             Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
         } catch (_: Exception) {
@@ -72,6 +86,9 @@ class CallVaultBridge(
     fun dispose() {
         callMonitor?.stop()
         callMonitor = null
+        smsObserver?.stop()
+        smsObserver = null
+        SmsEventHub.listener = null
         RecordingService.removeListener(this)
         try {
             Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)

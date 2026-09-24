@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../bridge/call_bridge.dart';
@@ -15,15 +17,26 @@ class _ThreadScreenState extends State<ThreadScreen> {
   List<Map<String, dynamic>> _messages = const [];
   final _reply = TextEditingController();
   bool _sending = false;
+  StreamSubscription<Map<String, dynamic>>? _eventsSub;
 
   @override
   void initState() {
     super.initState();
+    CallBridge.listen();
+    _eventsSub = CallBridge.events.listen((e) {
+      if (e['type'] == 'onSmsChanged') {
+        final addr = e['address']?.toString();
+        if (addr == null || addr.isEmpty || addr == widget.address) {
+          _load();
+        }
+      }
+    });
     _load(markRead: true);
   }
 
   @override
   void dispose() {
+    _eventsSub?.cancel();
     _reply.dispose();
     super.dispose();
   }

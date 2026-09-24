@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../bridge/call_bridge.dart';
@@ -19,16 +21,24 @@ class _ComposeScreenState extends State<ComposeScreen> {
   int _subscriptionId = -1;
   bool _sending = false;
   bool _smsSend = false;
+  StreamSubscription<Map<String, dynamic>>? _eventsSub;
 
   @override
   void initState() {
     super.initState();
+    CallBridge.listen();
+    _eventsSub = CallBridge.events.listen((e) {
+      if (e['type'] == 'onSmsChanged') {
+        _refreshConversations();
+      }
+    });
     _bootstrap();
     _body.addListener(() => setState(() {}));
   }
 
   @override
   void dispose() {
+    _eventsSub?.cancel();
     _to.dispose();
     _body.dispose();
     super.dispose();
@@ -42,6 +52,13 @@ class _ComposeScreenState extends State<ComposeScreen> {
       _conversations = await CallBridge.listSmsConversations();
     } catch (_) {}
     if (mounted) setState(() {});
+  }
+
+  Future<void> _refreshConversations() async {
+    try {
+      final list = await CallBridge.listSmsConversations();
+      if (mounted) setState(() => _conversations = list);
+    } catch (_) {}
   }
 
   Future<void> _request() async {
