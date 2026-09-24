@@ -8,16 +8,28 @@ This is **not** the full CallVault product. It exists to answer one question on 
 
 ## Important limitation
 
-**Two-way call audio is not guaranteed.** Android restricts ordinary third-party apps from freely capturing voice-call uplink/downlink audio. Being a default dialer does not automatically grant both sides. This prototype reports which `MediaRecorder` audio source started (`VOICE_COMMUNICATION` then `MIC` fallback) and leaves verification to **listening**.
+**Two-way call audio is not guaranteed** with the normal MediaRecorder path. Android restricts ordinary apps from capturing voice-call uplink/downlink. This prototype also includes an optional **Shizuku spike** that runs a shell UserService and tries privileged sources (`VOICE_CALL`, uplink, downlink).
 
-If the remote party is silent in the recording, treat that as an OS/device limitation — do not spend weeks “fixing” it in Flutter UI.
+If the remote party is still silent after Shizuku, treat that as a device/OS limit.
+
+## Shizuku setup (optional elevated path)
+
+1. Install [Shizuku](https://shizuku.rikka.app/) from GitHub / preferred store.
+2. On the phone: **Developer options → Wireless debugging → Pair / enable**.
+3. Open Shizuku → **Start** via Wireless debugging.
+4. Open CallVault Prototype → **Shizuku** section → **Grant Shizuku**.
+5. Turn **Use Shizuku recorder** ON.
+6. Start monitor → make a SIM call → verify **Source** starts with `SHIZUKU_…` (e.g. `SHIZUKU_VOICE_CALL`).
+7. Play the `.wav` file and check both voices.
+
+Keep Shizuku running (often again after reboot). This path is for power-user / sideload testing, not a Play Store–friendly default.
 
 ## Requirements
 
 - Flutter SDK (stable)
 - Physical Android phone with a working SIM (emulator is insufficient for cellular audio)
 - Android 10 or newer (minSdk 29)
-- USB debugging enabled
+- USB / Wireless debugging for Shizuku
 
 ## Project layout
 
@@ -32,6 +44,8 @@ android/.../kotlin/com/callvault/prototype/
   telecom/CallStateMonitor.kt
   recorder/CallRecorder.kt
   recorder/RecordingService.kt
+  shizuku/ShizukuRecorderClient.kt
+  shizuku/ShizukuRecorderService.kt
 ```
 
 Package / application id: `com.callvault.prototype`

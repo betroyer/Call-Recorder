@@ -11,11 +11,13 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.callvault.prototype.recorder.CallRecorder
 import com.callvault.prototype.recorder.RecordingService
+import com.callvault.prototype.shizuku.ShizukuRecorderClient
 import com.callvault.prototype.telecom.CallStateMonitor
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import rikka.shizuku.Shizuku
 
 class CallVaultBridge(
     private val activity: Activity,
@@ -38,17 +40,49 @@ class CallVaultBridge(
     private var lastCallState: String = "idle"
     private var pendingStartResult: ((CallRecorder.StartResult) -> Unit)? = null
     private var pendingStopResult: ((CallRecorder.StopResult) -> Unit)? = null
+    private var useShizuku: Boolean = false
+    private var activeMode: String = "none" // none | normal | shizuku
+    private val shizukuClient by lazy { ShizukuRecorderClient(activity) }
+
+    private val shizukuPermissionListener =
+        Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+            if (requestCode == ShizukuRecorderClient.REQ_CODE) {
+                emit(
+                    mapOf(
+                        "type" to "onShizukuState",
+                        "granted" to (grantResult == PackageManager.PERMISSION_GRANTED),
+                        "status" to shizukuClient.status(),
+                    ),
+                )
+            }
+        }
 
     fun register() {
         methodChannel.setMethodCallHandler(this)
         eventChannel.setStreamHandler(this)
         RecordingService.addListener(this)
+        try {
+            Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
+        } catch (_: Exception) {
+        }
     }
 
     fun dispose() {
         callMonitor?.stop()
         callMonitor = null
         RecordingService.removeListener(this)
+        try {
+            Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
+        } catch (_: Exception) {
+        }
+        if (activeMode == "shizuku") {
+            try {
+                shizukuClient.stop()
+            } catch (_: Exception) {
+            }
+            activeMode = "none"
+        }
+        shizukuClient.unbind()
         methodChannel.setMethodCallHandler(null)
         eventChannel.setStreamHandler(null)
         eventSink = null
@@ -74,7 +108,6 @@ class CallVaultBridge(
             "checkPermissions" -> result.success(permissionMap())
             "requestPermissions" -> {
                 ActivityCompat.requestPermissions(activity, requiredPermissions(), REQ_PERMS)
-                // Caller should re-check after the system dialog.
                 result.success(mapOf("requested" to true))
             }
             "openAppSettings" -> {
@@ -86,6 +119,17 @@ class CallVaultBridge(
                 activity.startActivity(intent)
                 result.success(true)
             }
+            "getShizukuStatus" -> result.success(shizukuClient.status())
+            "requestShizukuPermission" -> {
+                val ok = shizukuClient.requestPermission()
+                result.success(mapOf("requested" to ok, "status" to shizukuClient.status()))
+            }
+            "openShizukuApp" -> result.success(openShizukuApp())
+            "setUseShizuku" -> {
+                useShizuku = call.argument<Boolean>("enabled") == true
+                result.success(mapOf("useShizuku" to useShizuku))
+            }
+            "getUseShizuku" -> result.success(mapOf("useShizuku" to useShizuku))
             "startCallMonitor" -> {
                 if (!hasPermission(Manifest.permission.READ_PHONE_STATE)) {
                     result.error("permission_required", "READ_PHONE_STATE required", null)
@@ -111,64 +155,81 @@ class CallVaultBridge(
             result.error("permission_required", "RECORD_AUDIO required", null)
             return
         }
-        if (Build.VERSION.SDK_INT >= 33 && !hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
-            // Soft warning — still attempt; FGS notification may be limited.
-            emit(
-                mapOf(
-                    "type" to "onRecordingState",
-                    "state" to "warning",
-                    "error" to "POST_NOTIFICATIONS not granted; notification may be hidden",
-                ),
-            )
+
+        if (useShizuku) {
+            startShizukuRecording(result)
+            return
         }
 
+        activeMode = "normal"
         pendingStartResult = { start ->
             activity.runOnUiThread {
-                if (start.started) {
-                    result.success(
-                        mapOf(
-                            "recordingStarted" to true,
-                            "path" to start.path,
-                            "recordingSourceTried" to start.source,
-                            "error" to null,
-                        ),
-                    )
-                } else {
-                    result.success(
-                        mapOf(
-                            "recordingStarted" to false,
-                            "path" to null,
-                            "recordingSourceTried" to start.source,
-                            "error" to start.error,
-                        ),
-                    )
-                }
+                result.success(start.toMap())
             }
             pendingStartResult = null
         }
         RecordingService.start(activity)
     }
 
-    private fun stopRecording(result: MethodChannel.Result) {
-        pendingStopResult = { stop ->
+    private fun startShizukuRecording(result: MethodChannel.Result) {
+        Thread {
+            RecordingService.startNotifyOnly(activity)
+            val start = shizukuClient.start()
+            activeMode = if (start.started) "shizuku" else "none"
+            if (!start.started) {
+                RecordingService.stop(activity)
+            }
             activity.runOnUiThread {
-                result.success(
+                result.success(start.toMap())
+                emit(
                     mapOf(
-                        "path" to stop.path,
-                        "durationMs" to stop.durationMs,
-                        "bytes" to stop.bytes,
-                        "recordingSourceTried" to stop.source,
-                        "error" to stop.error,
+                        "type" to "onRecordingState",
+                        "state" to if (start.started) "recording" else "failed",
+                        "path" to start.path,
+                        "source" to start.source,
+                        "error" to start.error,
                     ),
                 )
             }
-            pendingStopResult = null
+        }.start()
+    }
+
+    private fun stopRecording(result: MethodChannel.Result) {
+        if (activeMode == "shizuku") {
+            Thread {
+                val stop = shizukuClient.stop()
+                activeMode = "none"
+                RecordingService.stop(activity)
+                activity.runOnUiThread {
+                    result.success(stop.toMap())
+                    emit(
+                        mapOf(
+                            "type" to "onRecordingState",
+                            "state" to if (stop.error == null) "stopped" else "failed",
+                            "path" to stop.path,
+                            "durationMs" to stop.durationMs,
+                            "bytes" to stop.bytes,
+                            "source" to stop.source,
+                            "error" to stop.error,
+                        ),
+                    )
+                }
+            }.start()
+            return
         }
-        if (!RecordingService.isRunning && pendingStopResult != null) {
-            // Service not running — still try to answer with empty stop.
+
+        pendingStopResult = { stop ->
+            activity.runOnUiThread {
+                result.success(stop.toMap())
+            }
+            pendingStopResult = null
+            activeMode = "none"
+        }
+        if (!RecordingService.isRunning) {
             val empty = CallRecorder.StopResult(null, 0, 0, null, "Service not running")
             pendingStopResult?.invoke(empty)
             pendingStopResult = null
+            activeMode = "none"
             return
         }
         RecordingService.stop(activity)
@@ -207,7 +268,6 @@ class CallVaultBridge(
         if (existing != null) return existing
         val monitor = CallStateMonitor(activity) { state, number ->
             lastCallState = state
-            // Map offhook as "connected" for prototype UI clarity.
             val uiState = if (state == "offhook") "connected" else state
             emit(
                 mapOf(
@@ -220,6 +280,18 @@ class CallVaultBridge(
         }
         callMonitor = monitor
         return monitor
+    }
+
+    private fun openShizukuApp(): Boolean {
+        val packages = listOf("moe.shizuku.privileged.api", "moe.shizuku.manager")
+        for (pkg in packages) {
+            val launch = activity.packageManager.getLaunchIntentForPackage(pkg)
+            if (launch != null) {
+                activity.startActivity(launch)
+                return true
+            }
+        }
+        return false
     }
 
     private fun emit(payload: Map<String, Any?>) {
@@ -256,6 +328,21 @@ class CallVaultBridge(
         return ContextCompat.checkSelfPermission(activity, permission) ==
             PackageManager.PERMISSION_GRANTED
     }
+
+    private fun CallRecorder.StartResult.toMap(): Map<String, Any?> = mapOf(
+        "recordingStarted" to started,
+        "path" to path,
+        "recordingSourceTried" to source,
+        "error" to error,
+    )
+
+    private fun CallRecorder.StopResult.toMap(): Map<String, Any?> = mapOf(
+        "path" to path,
+        "durationMs" to durationMs,
+        "bytes" to bytes,
+        "recordingSourceTried" to source,
+        "error" to error,
+    )
 
     companion object {
         const val METHOD_CHANNEL = "com.callvault.prototype/bridge"

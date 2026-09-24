@@ -143,7 +143,12 @@ class CallRecorder(private val context: Context) {
             val dir = File(context.getExternalFilesDir(null), "Recordings")
             if (!dir.exists()) return emptyList()
             return dir.listFiles()
-                ?.filter { it.isFile && it.extension.equals("m4a", ignoreCase = true) }
+                ?.filter {
+                    it.isFile && (
+                        it.extension.equals("m4a", ignoreCase = true) ||
+                            it.extension.equals("wav", ignoreCase = true)
+                        )
+                }
                 ?.sortedByDescending { it.lastModified() }
                 ?.map {
                     mapOf(

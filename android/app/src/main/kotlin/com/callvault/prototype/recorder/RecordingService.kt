@@ -36,9 +36,15 @@ class RecordingService : Service() {
                     isRunning = true
                 }
             }
+            ACTION_NOTIFY_ONLY -> {
+                ensureForeground()
+                isRunning = true
+            }
             ACTION_STOP -> {
-                val result = recorder.stop()
-                listeners.forEach { it.onRecordingStopped(result) }
+                if (recorder.isRecording) {
+                    val result = recorder.stop()
+                    listeners.forEach { it.onRecordingStopped(result) }
+                }
                 isRunning = false
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -124,6 +130,7 @@ class RecordingService : Service() {
         private const val NOTIFICATION_ID = 1001
 
         const val ACTION_START = "com.callvault.prototype.recorder.START"
+        const val ACTION_NOTIFY_ONLY = "com.callvault.prototype.recorder.NOTIFY_ONLY"
         const val ACTION_STOP = "com.callvault.prototype.recorder.STOP"
 
         private val listeners = mutableSetOf<Listener>()
@@ -138,6 +145,19 @@ class RecordingService : Service() {
 
         fun removeListener(listener: Listener) {
             listeners.remove(listener)
+        }
+
+        fun startNotifyOnly(context: Context) {
+            val intent = Intent(context, RecordingService::class.java).apply {
+                action = ACTION_NOTIFY_ONLY
+            }
+            try {
+                context.startForegroundService(intent)
+                isRunning = true
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start notify-only RecordingService", e)
+                isRunning = false
+            }
         }
 
         fun start(context: Context) {

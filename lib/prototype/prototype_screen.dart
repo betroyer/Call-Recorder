@@ -36,6 +36,8 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
   bool _heardSelf = false;
   bool _heardRemote = false;
   bool _heardBoth = false;
+  bool _useShizuku = false;
+  Map<String, dynamic> _shizuku = const {};
 
   List<Map<String, dynamic>> _recordings = const [];
 
@@ -56,6 +58,7 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
       _bridgeInfo = 'Bridge error: $e';
     }
     await _refreshPermissions();
+    await _refreshShizuku();
     await _refreshRecordings();
     if (mounted) setState(() {});
   }
@@ -66,6 +69,8 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
       final state = event['state']?.toString() ?? 'unknown';
       setState(() => _callState = state);
       _handleAutoRecord(state);
+    } else if (type == 'onShizukuState') {
+      _refreshShizuku();
     } else if (type == 'onRecordingState') {
       setState(() {
         _recordingState = event['state']?.toString() ?? _recordingState;
@@ -106,6 +111,30 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
     } catch (e) {
       setState(() => _lastError = e.toString());
     }
+  }
+
+  Future<void> _refreshShizuku() async {
+    try {
+      final status = await CallBridge.getShizukuStatus();
+      final enabled = await CallBridge.getUseShizuku();
+      if (mounted) {
+        setState(() {
+          _shizuku = status;
+          _useShizuku = enabled;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _shizuku = {'error': e.toString()};
+        });
+      }
+    }
+  }
+
+  Future<void> _setUseShizuku(bool enabled) async {
+    await CallBridge.setUseShizuku(enabled);
+    if (mounted) setState(() => _useShizuku = enabled);
   }
 
   Future<void> _refreshRecordings() async {
@@ -280,6 +309,55 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
             ],
           ),
           const SizedBox(height: 20),
+          _sectionTitle('Shizuku (elevated recording)'),
+          Text(
+            'Install Shizuku, enable Wireless Debugging, start Shizuku, then grant this app. '
+            'Tries VOICE_CALL / uplink / downlink in a shell process.',
+            style: theme.textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          Text('Installed: ${_yesNo(_shizuku['installed'])}'),
+          Text('Running: ${_yesNo(_shizuku['running'])}'),
+          Text('Permission: ${_yesNo(_shizuku['permission'])}'),
+          if (_shizuku['uidHint'] != null) Text('Ping: ${_shizuku['uidHint']}'),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Use Shizuku recorder'),
+            subtitle: Text(
+              _useShizuku
+                  ? 'Elevated shell capture (.wav)'
+                  : 'Normal in-app MediaRecorder (.m4a)',
+            ),
+            value: _useShizuku,
+            onChanged: (v) => _setUseShizuku(v),
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton(
+                onPressed: () async {
+                  await CallBridge.requestShizukuPermission();
+                  await _refreshShizuku();
+                },
+                child: const Text('Grant Shizuku'),
+              ),
+              OutlinedButton(
+                onPressed: () async {
+                  final ok = await CallBridge.openShizukuApp();
+                  if (!ok && mounted) {
+                    setState(() => _lastError = 'Shizuku app not installed');
+                  }
+                },
+                child: const Text('Open Shizuku'),
+              ),
+              OutlinedButton(
+                onPressed: _refreshShizuku,
+                child: const Text('Refresh status'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
           _sectionTitle('Call monitor'),
           Text('Call state: $_callState'),
           Text('Monitoring: ${_monitoring ? 'on' : 'off'}'),
@@ -409,4 +487,6 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
       ],
     );
   }
+
+  String _yesNo(Object? value) => value == true ? 'yes' : 'no';
 }

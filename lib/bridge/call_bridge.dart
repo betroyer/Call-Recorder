@@ -89,4 +89,28 @@ class CallBridge {
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
   }
+
+  static Future<Map<String, dynamic>> getShizukuStatus() async {
+    final result = await _methods.invokeMethod<dynamic>('getShizukuStatus');
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  static Future<Map<String, dynamic>> requestShizukuPermission() async {
+    final result = await _methods.invokeMethod<dynamic>('requestShizukuPermission');
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  static Future<bool> openShizukuApp() async {
+    final result = await _methods.invokeMethod<dynamic>('openShizukuApp');
+    return result == true;
+  }
+
+  static Future<void> setUseShizuku(bool enabled) async {
+    await _methods.invokeMethod<dynamic>('setUseShizuku', {'enabled': enabled});
+  }
+
+  static Future<bool> getUseShizuku() async {
+    final result = await _methods.invokeMethod<dynamic>('getUseShizuku');
+    return (result as Map)['useShizuku'] == true;
+  }
 }
