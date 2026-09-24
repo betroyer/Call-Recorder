@@ -178,6 +178,77 @@ class SmsHelper(private val activity: Activity) {
         return items
     }
 
+    fun setMessageRead(id: Long, read: Boolean): Map<String, Any?> {
+        if (!hasReadPermission()) {
+            return mapOf("ok" to false, "error" to "READ_SMS permission required")
+        }
+        return try {
+            val values = ContentValues().apply {
+                put(Telephony.Sms.READ, if (read) 1 else 0)
+                put(Telephony.Sms.SEEN, if (read) 1 else 0)
+            }
+            val updated = activity.contentResolver.update(
+                Telephony.Sms.CONTENT_URI,
+                values,
+                "${Telephony.Sms._ID}=?",
+                arrayOf(id.toString()),
+            )
+            if (updated <= 0) {
+                mapOf(
+                    "ok" to false,
+                    "error" to "Could not update (try Set as default SMS app)",
+                    "updated" to 0,
+                )
+            } else {
+                mapOf("ok" to true, "updated" to updated, "read" to read, "id" to id)
+            }
+        } catch (e: SecurityException) {
+            mapOf(
+                "ok" to false,
+                "error" to "Blocked — set CallVault as default SMS app to change read state",
+            )
+        } catch (e: Exception) {
+            mapOf("ok" to false, "error" to (e.message ?: "update failed"))
+        }
+    }
+
+    fun setThreadRead(address: String, read: Boolean): Map<String, Any?> {
+        if (!hasReadPermission()) {
+            return mapOf("ok" to false, "error" to "READ_SMS permission required")
+        }
+        if (address.isBlank()) {
+            return mapOf("ok" to false, "error" to "Address required")
+        }
+        return try {
+            val values = ContentValues().apply {
+                put(Telephony.Sms.READ, if (read) 1 else 0)
+                put(Telephony.Sms.SEEN, if (read) 1 else 0)
+            }
+            val updated = activity.contentResolver.update(
+                Telephony.Sms.CONTENT_URI,
+                values,
+                "${Telephony.Sms.ADDRESS}=?",
+                arrayOf(address),
+            )
+            if (updated <= 0) {
+                mapOf(
+                    "ok" to false,
+                    "error" to "Could not update (try Set as default SMS app)",
+                    "updated" to 0,
+                )
+            } else {
+                mapOf("ok" to true, "updated" to updated, "read" to read, "address" to address)
+            }
+        } catch (e: SecurityException) {
+            mapOf(
+                "ok" to false,
+                "error" to "Blocked — set CallVault as default SMS app to change read state",
+            )
+        } catch (e: Exception) {
+            mapOf("ok" to false, "error" to (e.message ?: "update failed"))
+        }
+    }
+
     fun listConversations(limit: Int = 80): List<Map<String, Any?>> {
         if (!hasReadPermission()) return emptyList()
         val cursor = try {
@@ -189,6 +260,7 @@ class SmsHelper(private val activity: Activity) {
                     Telephony.Sms.BODY,
                     Telephony.Sms.DATE,
                     Telephony.Sms.TYPE,
+                    Telephony.Sms.READ,
                 ),
                 null,
                 null,
@@ -212,6 +284,7 @@ class SmsHelper(private val activity: Activity) {
                         Telephony.Sms.MESSAGE_TYPE_SENT -> "sent"
                         else -> "other"
                     },
+                    "read" to (it.getInt(5) == 1),
                 )
             }
         }

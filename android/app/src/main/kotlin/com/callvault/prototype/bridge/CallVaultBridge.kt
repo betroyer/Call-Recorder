@@ -152,6 +152,20 @@ class CallVaultBridge(
                 val limit = call.argument<Int>("limit") ?: 100
                 result.success(smsHelper.listInbox(limit))
             }
+            "setSmsRead" -> {
+                val id = call.argument<Number>("id")?.toLong()
+                val read = call.argument<Boolean>("read") != false
+                if (id == null) {
+                    result.error("invalid", "id required", null)
+                    return
+                }
+                result.success(smsHelper.setMessageRead(id, read))
+            }
+            "setSmsThreadRead" -> {
+                val address = call.argument<String>("address") ?: ""
+                val read = call.argument<Boolean>("read") != false
+                result.success(smsHelper.setThreadRead(address, read))
+            }
             "listSmsConversations" -> {
                 val limit = call.argument<Int>("limit") ?: 80
                 result.success(smsHelper.listConversations(limit))

@@ -123,6 +123,28 @@ class CallBridge {
         .toList();
   }
 
+  static Future<Map<String, dynamic>> setSmsRead({
+    required int id,
+    required bool read,
+  }) async {
+    final result = await _methods.invokeMethod<dynamic>('setSmsRead', {
+      'id': id,
+      'read': read,
+    });
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  static Future<Map<String, dynamic>> setSmsThreadRead({
+    required String address,
+    required bool read,
+  }) async {
+    final result = await _methods.invokeMethod<dynamic>('setSmsThreadRead', {
+      'address': address,
+      'read': read,
+    });
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   static Future<List<Map<String, dynamic>>> listSmsConversations({
     int limit = 80,
   }) async {

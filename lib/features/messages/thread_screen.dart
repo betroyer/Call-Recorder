@@ -19,7 +19,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _load(markRead: true);
   }
 
   @override
@@ -28,9 +28,35 @@ class _ThreadScreenState extends State<ThreadScreen> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool markRead = false}) async {
     final list = await CallBridge.listSmsThread(widget.address);
+    if (markRead) {
+      await CallBridge.setSmsThreadRead(address: widget.address, read: true);
+    }
     if (mounted) setState(() => _messages = list);
+  }
+
+  Future<void> _setThreadRead(bool read) async {
+    final result = await CallBridge.setSmsThreadRead(
+      address: widget.address,
+      read: read,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          result['ok'] == true
+              ? (read ? 'Thread marked as read' : 'Thread marked as unread')
+              : '${result['error']}',
+        ),
+        action: result['ok'] == true
+            ? null
+            : SnackBarAction(
+                label: 'Default SMS',
+                onPressed: () => CallBridge.requestDefaultSmsRole(),
+              ),
+      ),
+    );
   }
 
   Future<void> _send() async {
@@ -58,7 +84,21 @@ class _ThreadScreenState extends State<ThreadScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.address)),
+      appBar: AppBar(
+        title: Text(widget.address),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'read') _setThreadRead(true);
+              if (value == 'unread') _setThreadRead(false);
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'read', child: Text('Mark as read')),
+              PopupMenuItem(value: 'unread', child: Text('Mark as unread')),
+            ],
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Expanded(
@@ -83,7 +123,9 @@ class _ThreadScreenState extends State<ThreadScreen> {
                     decoration: BoxDecoration(
                       color: mine
                           ? Theme.of(context).colorScheme.primaryContainer
-                          : Theme.of(context).colorScheme.surfaceContainerHighest,
+                          : Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(m['body']?.toString() ?? ''),
