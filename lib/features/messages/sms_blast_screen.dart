@@ -369,8 +369,8 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
           'Will send to: $unique unique'
           '${dupes > 0 ? ' ($dupes duplicate${dupes == 1 ? '' : 's'} skipped)' : ''}\n\n'
           '${_attempt > 0 ? 'Tagged as ${_attemptLabel(_attempt)} (undelivered-order follow-up).\n\n' : ''}'
-          'No recipient limit — large blasts are paced (~1s apart, slower after failures). '
-          'Carriers may still rate-limit or fail some numbers. Continue?',
+          'No recipient limit — blasts are paced ~2s apart (slower after failures). '
+          'Keep the app open. Continue?',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
@@ -448,11 +448,57 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
     final recipients = PhoneMatch.uniqueNormalized(pasted);
     final body = _message.text.trim();
     if (recipients.isEmpty || body.isEmpty || _sending) return;
+
+    if (!_isDefaultSms) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Set default SMS app'),
+          content: const Text(
+            'Mass SMS often fails with modem errors (16/124) when PYX is not the '
+            'default SMS app.\n\nSet PYX Food Products as default SMS, then try again.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Set default'),
+            ),
+          ],
+        ),
+      );
+      if (go == true) {
+        await CallBridge.requestDefaultSmsRole();
+        await _bootstrap();
+      }
+      return;
+    }
+
+    final pages = _smsMeta(AppBrand.brandMessage(body)).pages;
+    if (pages >= 4) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Long message ($pages SMS pages)'),
+          content: Text(
+            'This text uses about $pages SMS segments per recipient. '
+            'Long blasts overload the SIM modem and cause code 16/124 failures.\n\n'
+            'Tip: use a shorter message for large lists, then send details in Thread.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Edit')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Send anyway')),
+          ],
+        ),
+      );
+      if (go != true) return;
+    }
+
     if (!await _confirmRateLimit(pasted.length, recipients.length)) return;
 
     final branded = AppBrand.brandMessage(body);
     // Auto (-1): native picks last-OK SIM and fails over. Do NOT alternate SIMs.
-    final allSims = false;
+    const allSims = false;
 
     if (_scheduledAt != null && _scheduledAt!.isAfter(DateTime.now().add(const Duration(seconds: 5)))) {
       final result = await CallBridge.scheduleSmsBlast(
@@ -885,12 +931,26 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
             padding: const EdgeInsets.only(bottom: 8),
             child: AppNoticeBanner(
               icon: Icons.sms_outlined,
-              message: 'Set as default SMS app for better inbox and sent sync.',
+              tone: AppNoticeTone.warning,
+              message:
+                  'Required for reliable sending: set PYX Food Products as the default SMS app. '
+                  'Otherwise the modem often returns code 16/124.',
               actionLabel: 'Set',
               onAction: () async {
                 await CallBridge.requestDefaultSmsRole();
                 await _bootstrap();
               },
+            ),
+          ),
+        if (_sims.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: AppNoticeBanner(
+              icon: Icons.sim_card_outlined,
+              tone: AppNoticeTone.info,
+              message: _sims.any((s) => s['lastSuccessful'] == true)
+                  ? 'Using your SIM card. Prefer Auto or the SIM marked “has load / last OK” under Send via.'
+                  : 'Using your SIM card. Send one test from Message first, then pick that SIM (or Auto) here.',
             ),
           ),
         Row(

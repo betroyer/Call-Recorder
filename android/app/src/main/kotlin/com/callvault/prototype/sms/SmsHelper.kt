@@ -122,26 +122,38 @@ class SmsHelper(private val activity: Activity) {
     private fun subscriptionTryOrder(preferredId: Int): List<Int> {
         val active = activeSubscriptionIds()
         if (active.isEmpty()) {
-            return if (preferredId >= 0) listOf(preferredId) else listOf(-1)
+            val defSms = defaultSmsSubscriptionId()
+            return when {
+                preferredId >= 0 -> listOf(preferredId)
+                defSms >= 0 -> listOf(defSms)
+                else -> listOf(-1)
+            }
         }
         val ordered = linkedSetOf<Int>()
         if (preferredId >= 0 && active.contains(preferredId)) {
             ordered.add(preferredId)
-        } else {
-            val lastOk = lastSuccessfulSmsSubId()
-            if (lastOk >= 0 && active.contains(lastOk)) ordered.add(lastOk)
-            val defSms = defaultSmsSubscriptionId()
-            if (defSms >= 0 && active.contains(defSms)) ordered.add(defSms)
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    val dataId = SubscriptionManager.getDefaultDataSubscriptionId()
-                    if (dataId >= 0 && active.contains(dataId)) ordered.add(dataId)
-                }
-            } catch (_: Exception) {
+        }
+        val lastOk = lastSuccessfulSmsSubId()
+        if (lastOk >= 0 && active.contains(lastOk)) ordered.add(lastOk)
+        val defSms = defaultSmsSubscriptionId()
+        if (defSms >= 0 && active.contains(defSms)) ordered.add(defSms)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                val dataId = SubscriptionManager.getDefaultDataSubscriptionId()
+                if (dataId >= 0 && active.contains(dataId)) ordered.add(dataId)
             }
+        } catch (_: Exception) {
         }
         active.forEach { ordered.add(it) }
         return ordered.toList()
+    }
+
+    private fun forgetSuccessfulSmsSubId(subscriptionId: Int) {
+        if (subscriptionId < 0) return
+        val prefs = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getInt(KEY_LAST_SMS_SUB, -1) == subscriptionId) {
+            prefs.edit().remove(KEY_LAST_SMS_SUB).apply()
+        }
     }
 
     private fun shouldRetryOnOtherSim(resultCode: Int): Boolean {
@@ -558,12 +570,9 @@ class SmsHelper(private val activity: Activity) {
             )
         }
 
-        // Explicit SIM: try only that one. Auto (-1): try last-OK / SMS-default / others.
-        val tryOrder = if (subscriptionId >= 0) {
-            listOf(subscriptionId)
-        } else {
-            subscriptionTryOrder(-1)
-        }
+        // Always prefer the chosen SIM first, but fail over to other slots on modem errors
+        // (wrong/empty-load SIM is the most common cause of mass code 16/124 failures).
+        val tryOrder = subscriptionTryOrder(subscriptionId)
 
         var lastFailure: Map<String, Any?> = mapOf(
             "ok" to false,
@@ -580,26 +589,30 @@ class SmsHelper(private val activity: Activity) {
                 rememberSuccessfulSmsSubId(subId)
                 return attempt + mapOf(
                     "triedSims" to attempts.size,
-                    "autoSelected" to (subscriptionId < 0),
+                    "autoSelected" to (subscriptionId < 0 || attempts.size > 1),
                 )
             }
             lastFailure = attempt
             val code = (attempt["resultCode"] as? Number)?.toInt() ?: -1
+            if (SmsSentWaiters.isTransientModemError(code)) {
+                forgetSuccessfulSmsSubId(subId)
+            }
             val moreSims = index < tryOrder.lastIndex
             if (!moreSims || !shouldRetryOnOtherSim(code)) {
                 break
             }
             try {
-                Thread.sleep(350)
+                Thread.sleep(700)
             } catch (_: InterruptedException) {
             }
         }
 
         val err = lastFailure["error"]?.toString() ?: "Send failed on all SIMs"
         val hint = if (tryOrder.size > 1) {
-            " Tried ${attempts.size} SIM(s). Pick the SIM with load under Send via."
+            " Tried ${attempts.size} SIM(s). Put SMS load on one SIM, pick it under Send via, " +
+                "set PYX Food Products as default SMS, then retry."
         } else {
-            " Select the SIM with load under Send via."
+            " Put SMS load on the SIM, set PYX Food Products as default SMS, then retry."
         }
         SmsEventHub.emit(
             mapOf(
@@ -832,15 +845,32 @@ class SmsHelper(private val activity: Activity) {
                 ),
             )
             // Pace blasts so the modem can keep up (codes 16/124 = busy/overloaded).
+            // PH prepaid modems often need 2s+ between recipients.
+            val partHint = try {
+                smsManagerFor(
+                    (result["subscriptionId"] as? Number)?.toInt() ?: -1,
+                ).divideMessage(body)?.size ?: 1
+            } catch (_: Exception) {
+                1
+            }
             val delayMs = when {
-                consecutiveFails >= 5 -> 2800L
-                consecutiveFails >= 2 -> 1800L
-                result["ok"] != true -> 1400L
-                else -> 1000L
+                consecutiveFails >= 5 -> 8000L
+                consecutiveFails >= 3 -> 4500L
+                consecutiveFails >= 1 -> 3000L
+                partHint > 3 -> 2800L
+                partHint > 1 -> 2200L
+                else -> 1800L
             }
             try {
                 Thread.sleep(delayMs)
             } catch (_: InterruptedException) {
+            }
+            if (consecutiveFails >= 5 && consecutiveFails % 5 == 0) {
+                // Cool-down so carrier/modem can recover from burst rejects.
+                try {
+                    Thread.sleep(10_000L)
+                } catch (_: InterruptedException) {
+                }
             }
         }
 

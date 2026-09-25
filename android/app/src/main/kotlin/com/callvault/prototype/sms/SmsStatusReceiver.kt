@@ -32,7 +32,7 @@ object SmsSentWaiters {
         entry.latch.countDown()
     }
 
-    fun awaitSent(requestCode: Int, timeoutMs: Long = 25_000L): Int {
+    fun awaitSent(requestCode: Int, timeoutMs: Long = 45_000L): Int {
         val entry = sent[requestCode] ?: return Activity.RESULT_OK
         val finished = entry.latch.await(timeoutMs, TimeUnit.MILLISECONDS)
         sent.remove(requestCode)
