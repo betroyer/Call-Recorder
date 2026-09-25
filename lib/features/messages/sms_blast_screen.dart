@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../branding.dart';
 import '../../bridge/call_bridge.dart';
+import '../../contacts/phone_match.dart';
 import '../../database/app_database.dart';
 import '../../database/db.dart';
 import '../../widgets/app_ui.dart';
@@ -28,6 +29,8 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
   List<BlastJob> _history = const [];
   int _subscriptionId = -1;
   String _priority = 'Low';
+  /// 0 = normal; 1–3 = undelivered-order follow-up attempt.
+  int _attempt = 0;
   DateTime? _scheduledAt;
   bool _sending = false;
   bool _smsSend = false;
@@ -242,6 +245,16 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
         .toList();
   }
 
+  List<String> _uniqueRecipients() =>
+      PhoneMatch.uniqueNormalized(_parseNumbers(_numbers.text));
+
+  String _attemptLabel(int attempt) => switch (attempt) {
+        1 => '1st attempt',
+        2 => '2nd attempt',
+        3 => '3rd attempt',
+        _ => 'Normal blast',
+      };
+
   ({int chars, int pages}) _smsMeta(String text) {
     final isGsm = text.codeUnits.every((c) => c <= 127);
     final limit = isGsm ? 160 : 70;
@@ -340,31 +353,102 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
     });
   }
 
-  Future<bool> _confirmRateLimit(int count) async {
-    if (count < 20) return true;
+  Future<bool> _confirmRateLimit(int pasted, int unique) async {
+    final dupes = pasted - unique;
+    if (unique < 20 && dupes == 0) return true;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Large SMS blast'),
+        title: Text(
+          _attempt > 0
+              ? 'Send ${_attemptLabel(_attempt)}?'
+              : 'Confirm SMS blast',
+        ),
         content: Text(
-          'You are about to send to $count numbers.\n\n'
-          'Carriers may rate-limit or block bulk SMS. '
-          'Messages are paced (~400ms apart). Continue?',
+          'Pasted: $pasted number${pasted == 1 ? '' : 's'}\n'
+          'Will send to: $unique unique'
+          '${dupes > 0 ? ' ($dupes duplicate${dupes == 1 ? '' : 's'} skipped)' : ''}\n\n'
+          '${_attempt > 0 ? 'Tagged as ${_attemptLabel(_attempt)} (undelivered-order follow-up).\n\n' : ''}'
+          'No recipient limit — large blasts are paced (~400ms apart). '
+          'Carriers may still rate-limit or fail some numbers. Continue?',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Send anyway')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Send')),
         ],
       ),
     );
     return ok == true;
   }
 
+  Future<void> _loadFailedFromBlast(BlastJob job) async {
+    final failed = await appDatabase.failedAddressesForBlast(job.id);
+    if (!mounted) return;
+    if (failed.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No failed/cancelled numbers in that blast')),
+      );
+      return;
+    }
+    setState(() {
+      _numbers.text = failed.join('\n');
+      if (job.attempt > 0) _attempt = job.attempt;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Loaded ${failed.length} failed numbers')),
+    );
+  }
+
+  Future<void> _loadFailedFromLast() async {
+    final job = _attempt > 0
+        ? await appDatabase.latestBlastWithAttempt(_attempt)
+        : await appDatabase.latestBlast();
+    if (job == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No previous blast found')),
+      );
+      return;
+    }
+    await _loadFailedFromBlast(job);
+  }
+
+  /// Drop numbers that already got this attempt (or higher) successfully.
+  Future<void> _trimAlreadyAttempted() async {
+    if (_attempt <= 0) return;
+    final unique = _uniqueRecipients();
+    if (unique.isEmpty) return;
+    final maxByKey = await appDatabase.maxSentAttemptByKey();
+    final kept = <String>[];
+    var skipped = 0;
+    for (final n in unique) {
+      final key = PhoneMatch.matchKey(n);
+      final done = maxByKey[key] ?? 0;
+      if (done >= _attempt) {
+        skipped++;
+      } else {
+        kept.add(n);
+      }
+    }
+    if (!mounted) return;
+    setState(() => _numbers.text = kept.join('\n'));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          skipped == 0
+              ? 'None already completed ${_attemptLabel(_attempt)}'
+              : 'Removed $skipped already on ${_attemptLabel(_attempt)}+ · ${kept.length} left',
+        ),
+      ),
+    );
+  }
+
   Future<void> _send() async {
-    final recipients = _parseNumbers(_numbers.text);
+    final pasted = _parseNumbers(_numbers.text);
+    final recipients = PhoneMatch.uniqueNormalized(pasted);
     final body = _message.text.trim();
     if (recipients.isEmpty || body.isEmpty || _sending) return;
-    if (!await _confirmRateLimit(recipients.length)) return;
+    if (!await _confirmRateLimit(pasted.length, recipients.length)) return;
 
     final branded = AppBrand.brandMessage(body);
     final allSims = _subscriptionId < 0;
@@ -383,7 +467,7 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
         SnackBar(
           content: Text(
             result['ok'] == true
-                ? 'Scheduled blast for ${_scheduledAt!.toLocal()} (${recipients.length} numbers)'
+                ? 'Scheduled blast for ${_scheduledAt!.toLocal()} (${recipients.length} unique)'
                 : 'Schedule failed: ${result['error']}',
           ),
         ),
@@ -422,6 +506,7 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
         id: blastId,
         body: body,
         priority: _priority,
+        attempt: _attempt,
         total: (result['total'] as num?)?.toInt() ?? recipients.length,
         sent: (result['sent'] as num?)?.toInt() ?? 0,
         failed: (result['failed'] as num?)?.toInt() ?? 0,
@@ -435,11 +520,14 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
       });
       await _bootstrap();
       if (!mounted) return;
+      final sent = result['sent'];
+      final failed = result['failed'];
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
+            '${_attempt > 0 ? '${_attemptLabel(_attempt)} · ' : ''}'
             'Blast ${result['cancelled'] == true ? 'cancelled' : 'done'} · '
-            'sent ${result['sent']} · failed ${result['failed']}',
+            'sent $sent · failed $failed · total ${recipients.length}',
           ),
         ),
       );
@@ -494,7 +582,10 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
             child: Column(
               children: [
                 ListTile(
-                  title: Text('Blast · ${job.sent}/${job.total} sent'),
+                  title: Text(
+                    '${job.attempt > 0 ? '${_attemptLabel(job.attempt)} · ' : ''}'
+                    'Blast · ${job.sent}/${job.total} sent',
+                  ),
                   subtitle: Text(
                     '${_formatHistoryDate(job.createdAt)}\n${job.body}',
                     maxLines: 3,
@@ -520,6 +611,20 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
                         );
                       }
                     },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _loadFailedFromBlast(job);
+                      },
+                      icon: const Icon(Icons.replay, size: 18),
+                      label: const Text('Load failed numbers into Blast'),
+                    ),
                   ),
                 ),
                 Padding(
@@ -681,6 +786,7 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
                   vertical: 4,
                 ),
                 title: Text(
+                  '${h.attempt > 0 ? '${_attemptLabel(h.attempt)} · ' : ''}'
                   '${h.sent}/${h.total} sent · ${h.priority}',
                   style: theme.textTheme.titleSmall,
                 ),
@@ -704,7 +810,35 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
                   ],
                 ),
                 isThreeLine: true,
-                trailing: const Icon(Icons.chevron_right_rounded),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (v) async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    if (v == 'open') await _showHistoryDetail(h);
+                    if (v == 'failed') await _loadFailedFromBlast(h);
+                    if (v == 'export') {
+                      try {
+                        await BlastHistoryExporter.share(
+                          jobs: [h],
+                          label: _formatHistoryDate(h.createdAt)
+                              .split(' · ')
+                              .first,
+                        );
+                      } catch (e) {
+                        messenger.showSnackBar(
+                          SnackBar(content: Text('Export failed: $e')),
+                        );
+                      }
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: 'open', child: Text('Open details')),
+                    PopupMenuItem(
+                      value: 'failed',
+                      child: Text('Load failed numbers'),
+                    ),
+                    PopupMenuItem(value: 'export', child: Text('Export CSV')),
+                  ],
+                ),
                 onTap: () => _showHistoryDetail(h),
               ),
             ),
@@ -717,7 +851,9 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final meta = _smsMeta(_message.text);
-    final count = _parseNumbers(_numbers.text).length;
+    final pasted = _parseNumbers(_numbers.text).length;
+    final unique = _uniqueRecipients().length;
+    final dupes = pasted - unique;
     final scheduleLabel = _scheduledAt == null
         ? 'Send now'
         : '${_scheduledAt!.month}/${_scheduledAt!.day} '
@@ -760,7 +896,8 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
           children: [
             Expanded(
               child: Text(
-                'Recipients ($count)',
+                'Recipients ($unique unique'
+                '${pasted != unique ? ' · $pasted pasted' : ''})',
                 style: theme.textTheme.titleSmall,
               ),
             ),
@@ -777,12 +914,59 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
           maxLines: 8,
           textAlignVertical: TextAlignVertical.top,
           decoration: const InputDecoration(
-            hintText: 'Mobile numbers (ex. 09178943492)',
+            hintText: 'Mobile numbers (ex. 09178943492) — no limit',
             border: OutlineInputBorder(),
             alignLabelWithHint: true,
           ),
         ),
-        const SizedBox(height: 16),
+        if (dupes > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              '$dupes duplicate${dupes == 1 ? '' : 's'} will be skipped (same number twice or 09/+63).',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
+            ),
+          ),
+        const SizedBox(height: 8),
+        InputDecorator(
+          decoration: const InputDecoration(
+            labelText: 'Order follow-up attempt',
+            helperText: 'Tag 1st / 2nd / 3rd for undelivered-order reminders',
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
+              isExpanded: true,
+              value: _attempt,
+              items: const [
+                DropdownMenuItem(value: 0, child: Text('None (normal blast)')),
+                DropdownMenuItem(value: 1, child: Text('1st attempt')),
+                DropdownMenuItem(value: 2, child: Text('2nd attempt')),
+                DropdownMenuItem(value: 3, child: Text('3rd attempt')),
+              ],
+              onChanged: (v) => setState(() => _attempt = v ?? 0),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 4,
+          children: [
+            TextButton(
+              onPressed: _sending ? null : _loadFailedFromLast,
+              child: const Text('Load failed (last)'),
+            ),
+            if (_attempt > 0)
+              TextButton(
+                onPressed: _sending ? null : _trimAlreadyAttempted,
+                child: Text('Remove already on ${_attemptLabel(_attempt)}+'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
         Text('Message', style: theme.textTheme.titleSmall),
         const SizedBox(height: 8),
         TextField(
@@ -800,7 +984,9 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
         SlashQuickReplyPanel(controller: _message),
         const SizedBox(height: 8),
         Text(
-          '${meta.chars} character · ${meta.pages} SMS page · $count recipient(s)',
+          '${meta.chars} character · ${meta.pages} SMS page · '
+          '$unique unique to send'
+          '${_attempt > 0 ? ' · ${_attemptLabel(_attempt)}' : ''}',
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),

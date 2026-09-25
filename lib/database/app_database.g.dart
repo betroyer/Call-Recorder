@@ -333,6 +333,18 @@ class $BlastJobsTable extends BlastJobs
     requiredDuringInsert: false,
     defaultValue: const Constant('Low'),
   );
+  static const VerificationMeta _attemptMeta = const VerificationMeta(
+    'attempt',
+  );
+  @override
+  late final GeneratedColumn<int> attempt = GeneratedColumn<int>(
+    'attempt',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   static const VerificationMeta _totalMeta = const VerificationMeta('total');
   @override
   late final GeneratedColumn<int> total = GeneratedColumn<int>(
@@ -405,6 +417,7 @@ class $BlastJobsTable extends BlastJobs
     id,
     body,
     priority,
+    attempt,
     total,
     sent,
     failed,
@@ -441,6 +454,12 @@ class $BlastJobsTable extends BlastJobs
       context.handle(
         _priorityMeta,
         priority.isAcceptableOrUnknown(data['priority']!, _priorityMeta),
+      );
+    }
+    if (data.containsKey('attempt')) {
+      context.handle(
+        _attemptMeta,
+        attempt.isAcceptableOrUnknown(data['attempt']!, _attemptMeta),
       );
     }
     if (data.containsKey('total')) {
@@ -500,6 +519,10 @@ class $BlastJobsTable extends BlastJobs
         DriftSqlType.string,
         data['${effectivePrefix}priority'],
       )!,
+      attempt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}attempt'],
+      )!,
       total: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}total'],
@@ -537,6 +560,9 @@ class BlastJob extends DataClass implements Insertable<BlastJob> {
   final String id;
   final String body;
   final String priority;
+
+  /// 0 = normal blast; 1–3 = undelivered-order follow-up attempt.
+  final int attempt;
   final int total;
   final int sent;
   final int failed;
@@ -547,6 +573,7 @@ class BlastJob extends DataClass implements Insertable<BlastJob> {
     required this.id,
     required this.body,
     required this.priority,
+    required this.attempt,
     required this.total,
     required this.sent,
     required this.failed,
@@ -560,6 +587,7 @@ class BlastJob extends DataClass implements Insertable<BlastJob> {
     map['id'] = Variable<String>(id);
     map['body'] = Variable<String>(body);
     map['priority'] = Variable<String>(priority);
+    map['attempt'] = Variable<int>(attempt);
     map['total'] = Variable<int>(total);
     map['sent'] = Variable<int>(sent);
     map['failed'] = Variable<int>(failed);
@@ -574,6 +602,7 @@ class BlastJob extends DataClass implements Insertable<BlastJob> {
       id: Value(id),
       body: Value(body),
       priority: Value(priority),
+      attempt: Value(attempt),
       total: Value(total),
       sent: Value(sent),
       failed: Value(failed),
@@ -592,6 +621,7 @@ class BlastJob extends DataClass implements Insertable<BlastJob> {
       id: serializer.fromJson<String>(json['id']),
       body: serializer.fromJson<String>(json['body']),
       priority: serializer.fromJson<String>(json['priority']),
+      attempt: serializer.fromJson<int>(json['attempt']),
       total: serializer.fromJson<int>(json['total']),
       sent: serializer.fromJson<int>(json['sent']),
       failed: serializer.fromJson<int>(json['failed']),
@@ -607,6 +637,7 @@ class BlastJob extends DataClass implements Insertable<BlastJob> {
       'id': serializer.toJson<String>(id),
       'body': serializer.toJson<String>(body),
       'priority': serializer.toJson<String>(priority),
+      'attempt': serializer.toJson<int>(attempt),
       'total': serializer.toJson<int>(total),
       'sent': serializer.toJson<int>(sent),
       'failed': serializer.toJson<int>(failed),
@@ -620,6 +651,7 @@ class BlastJob extends DataClass implements Insertable<BlastJob> {
     String? id,
     String? body,
     String? priority,
+    int? attempt,
     int? total,
     int? sent,
     int? failed,
@@ -630,6 +662,7 @@ class BlastJob extends DataClass implements Insertable<BlastJob> {
     id: id ?? this.id,
     body: body ?? this.body,
     priority: priority ?? this.priority,
+    attempt: attempt ?? this.attempt,
     total: total ?? this.total,
     sent: sent ?? this.sent,
     failed: failed ?? this.failed,
@@ -642,6 +675,7 @@ class BlastJob extends DataClass implements Insertable<BlastJob> {
       id: data.id.present ? data.id.value : this.id,
       body: data.body.present ? data.body.value : this.body,
       priority: data.priority.present ? data.priority.value : this.priority,
+      attempt: data.attempt.present ? data.attempt.value : this.attempt,
       total: data.total.present ? data.total.value : this.total,
       sent: data.sent.present ? data.sent.value : this.sent,
       failed: data.failed.present ? data.failed.value : this.failed,
@@ -657,6 +691,7 @@ class BlastJob extends DataClass implements Insertable<BlastJob> {
           ..write('id: $id, ')
           ..write('body: $body, ')
           ..write('priority: $priority, ')
+          ..write('attempt: $attempt, ')
           ..write('total: $total, ')
           ..write('sent: $sent, ')
           ..write('failed: $failed, ')
@@ -672,6 +707,7 @@ class BlastJob extends DataClass implements Insertable<BlastJob> {
     id,
     body,
     priority,
+    attempt,
     total,
     sent,
     failed,
@@ -686,6 +722,7 @@ class BlastJob extends DataClass implements Insertable<BlastJob> {
           other.id == this.id &&
           other.body == this.body &&
           other.priority == this.priority &&
+          other.attempt == this.attempt &&
           other.total == this.total &&
           other.sent == this.sent &&
           other.failed == this.failed &&
@@ -698,6 +735,7 @@ class BlastJobsCompanion extends UpdateCompanion<BlastJob> {
   final Value<String> id;
   final Value<String> body;
   final Value<String> priority;
+  final Value<int> attempt;
   final Value<int> total;
   final Value<int> sent;
   final Value<int> failed;
@@ -709,6 +747,7 @@ class BlastJobsCompanion extends UpdateCompanion<BlastJob> {
     this.id = const Value.absent(),
     this.body = const Value.absent(),
     this.priority = const Value.absent(),
+    this.attempt = const Value.absent(),
     this.total = const Value.absent(),
     this.sent = const Value.absent(),
     this.failed = const Value.absent(),
@@ -721,6 +760,7 @@ class BlastJobsCompanion extends UpdateCompanion<BlastJob> {
     required String id,
     required String body,
     this.priority = const Value.absent(),
+    this.attempt = const Value.absent(),
     this.total = const Value.absent(),
     this.sent = const Value.absent(),
     this.failed = const Value.absent(),
@@ -734,6 +774,7 @@ class BlastJobsCompanion extends UpdateCompanion<BlastJob> {
     Expression<String>? id,
     Expression<String>? body,
     Expression<String>? priority,
+    Expression<int>? attempt,
     Expression<int>? total,
     Expression<int>? sent,
     Expression<int>? failed,
@@ -746,6 +787,7 @@ class BlastJobsCompanion extends UpdateCompanion<BlastJob> {
       if (id != null) 'id': id,
       if (body != null) 'body': body,
       if (priority != null) 'priority': priority,
+      if (attempt != null) 'attempt': attempt,
       if (total != null) 'total': total,
       if (sent != null) 'sent': sent,
       if (failed != null) 'failed': failed,
@@ -760,6 +802,7 @@ class BlastJobsCompanion extends UpdateCompanion<BlastJob> {
     Value<String>? id,
     Value<String>? body,
     Value<String>? priority,
+    Value<int>? attempt,
     Value<int>? total,
     Value<int>? sent,
     Value<int>? failed,
@@ -772,6 +815,7 @@ class BlastJobsCompanion extends UpdateCompanion<BlastJob> {
       id: id ?? this.id,
       body: body ?? this.body,
       priority: priority ?? this.priority,
+      attempt: attempt ?? this.attempt,
       total: total ?? this.total,
       sent: sent ?? this.sent,
       failed: failed ?? this.failed,
@@ -793,6 +837,9 @@ class BlastJobsCompanion extends UpdateCompanion<BlastJob> {
     }
     if (priority.present) {
       map['priority'] = Variable<String>(priority.value);
+    }
+    if (attempt.present) {
+      map['attempt'] = Variable<int>(attempt.value);
     }
     if (total.present) {
       map['total'] = Variable<int>(total.value);
@@ -824,6 +871,7 @@ class BlastJobsCompanion extends UpdateCompanion<BlastJob> {
           ..write('id: $id, ')
           ..write('body: $body, ')
           ..write('priority: $priority, ')
+          ..write('attempt: $attempt, ')
           ..write('total: $total, ')
           ..write('sent: $sent, ')
           ..write('failed: $failed, ')
@@ -1387,6 +1435,7 @@ typedef $$BlastJobsTableCreateCompanionBuilder =
       required String id,
       required String body,
       Value<String> priority,
+      Value<int> attempt,
       Value<int> total,
       Value<int> sent,
       Value<int> failed,
@@ -1400,6 +1449,7 @@ typedef $$BlastJobsTableUpdateCompanionBuilder =
       Value<String> id,
       Value<String> body,
       Value<String> priority,
+      Value<int> attempt,
       Value<int> total,
       Value<int> sent,
       Value<int> failed,
@@ -1430,6 +1480,11 @@ class $$BlastJobsTableFilterComposer
 
   ColumnFilters<String> get priority => $composableBuilder(
     column: $table.priority,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get attempt => $composableBuilder(
+    column: $table.attempt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -1488,6 +1543,11 @@ class $$BlastJobsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get attempt => $composableBuilder(
+    column: $table.attempt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get total => $composableBuilder(
     column: $table.total,
     builder: (column) => ColumnOrderings(column),
@@ -1536,6 +1596,9 @@ class $$BlastJobsTableAnnotationComposer
 
   GeneratedColumn<String> get priority =>
       $composableBuilder(column: $table.priority, builder: (column) => column);
+
+  GeneratedColumn<int> get attempt =>
+      $composableBuilder(column: $table.attempt, builder: (column) => column);
 
   GeneratedColumn<int> get total =>
       $composableBuilder(column: $table.total, builder: (column) => column);
@@ -1587,6 +1650,7 @@ class $$BlastJobsTableTableManager
                 Value<String> id = const Value.absent(),
                 Value<String> body = const Value.absent(),
                 Value<String> priority = const Value.absent(),
+                Value<int> attempt = const Value.absent(),
                 Value<int> total = const Value.absent(),
                 Value<int> sent = const Value.absent(),
                 Value<int> failed = const Value.absent(),
@@ -1598,6 +1662,7 @@ class $$BlastJobsTableTableManager
                 id: id,
                 body: body,
                 priority: priority,
+                attempt: attempt,
                 total: total,
                 sent: sent,
                 failed: failed,
@@ -1611,6 +1676,7 @@ class $$BlastJobsTableTableManager
                 required String id,
                 required String body,
                 Value<String> priority = const Value.absent(),
+                Value<int> attempt = const Value.absent(),
                 Value<int> total = const Value.absent(),
                 Value<int> sent = const Value.absent(),
                 Value<int> failed = const Value.absent(),
@@ -1622,6 +1688,7 @@ class $$BlastJobsTableTableManager
                 id: id,
                 body: body,
                 priority: priority,
+                attempt: attempt,
                 total: total,
                 sent: sent,
                 failed: failed,

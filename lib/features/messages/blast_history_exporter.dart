@@ -29,7 +29,7 @@ class BlastHistoryExporter {
   static Future<String> buildCsv(List<BlastJob> jobs) async {
     final buf = StringBuffer();
     buf.writeln(
-      'blast_id,date,priority,blast_status,sent,failed,total,body,recipient,recipient_status,error',
+      'blast_id,date,attempt,priority,blast_status,sent,failed,total,body,recipient,recipient_status,error',
     );
     for (final job in jobs) {
       final rows = await appDatabase.recipientsFor(job.id);
@@ -38,6 +38,7 @@ class BlastHistoryExporter {
           [
             _csvEscape(job.id),
             _csvEscape(_iso(job.createdAt)),
+            job.attempt,
             _csvEscape(job.priority),
             _csvEscape(job.status),
             job.sent,
@@ -56,6 +57,7 @@ class BlastHistoryExporter {
           [
             _csvEscape(job.id),
             _csvEscape(_iso(job.createdAt)),
+            job.attempt,
             _csvEscape(job.priority),
             _csvEscape(job.status),
             job.sent,
