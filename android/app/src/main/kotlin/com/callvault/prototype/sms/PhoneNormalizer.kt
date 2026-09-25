@@ -21,4 +21,10 @@ object PhoneNormalizer {
         }
         return if (hasPlus) "+$digits" else digits
     }
+
+    /** Shared match key so +63917… and 0917… resolve to the same contact. */
+    fun matchKey(raw: String): String {
+        val digits = normalize(raw).filter { it.isDigit() }
+        return if (digits.length >= 10) digits.takeLast(10) else digits
+    }
 }

@@ -219,12 +219,59 @@ class SmsHelper(private val activity: Activity) {
         cursor.use {
             while (it.moveToNext() && items.size < limit) {
                 val name = it.getString(0) ?: ""
-                val number = (it.getString(1) ?: "").replace(" ", "").trim()
-                if (number.isEmpty() || !seen.add(number)) continue
-                items.add(mapOf("name" to name, "number" to number))
+                val number = (it.getString(1) ?: "").trim()
+                if (number.isEmpty()) continue
+                val key = PhoneNormalizer.matchKey(number)
+                if (key.isEmpty() || !seen.add(key)) continue
+                items.add(
+                    mapOf(
+                        "name" to name,
+                        "number" to PhoneNormalizer.normalize(number),
+                        "matchKey" to key,
+                    ),
+                )
             }
         }
         return items
+    }
+
+    fun resolveContactName(address: String): String? {
+        if (address.isBlank() || !hasContactsPermission()) return null
+        val key = PhoneNormalizer.matchKey(address)
+        if (key.isEmpty()) return null
+        return contactNameByKey()[key]
+    }
+
+    private fun contactNameByKey(): Map<String, String> {
+        if (!hasContactsPermission()) return emptyMap()
+        val map = linkedMapOf<String, String>()
+        val cursor = try {
+            activity.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER,
+                ),
+                null,
+                null,
+                null,
+            )
+        } catch (_: SecurityException) {
+            null
+        } ?: return emptyMap()
+
+        cursor.use {
+            while (it.moveToNext()) {
+                val name = it.getString(0)?.trim().orEmpty()
+                val number = it.getString(1)?.trim().orEmpty()
+                if (name.isEmpty() || number.isEmpty()) continue
+                val key = PhoneNormalizer.matchKey(number)
+                if (key.isNotEmpty()) {
+                    map.putIfAbsent(key, name)
+                }
+            }
+        }
+        return map
     }
 
     fun listInbox(limit: Int = 100): List<Map<String, Any?>> {
@@ -385,17 +432,18 @@ class SmsHelper(private val activity: Activity) {
                 }
             }
         }
+        val names = contactNameByKey()
         return byKey.map { (key, row) ->
             val unread = unreadByKey[key] ?: 0
             row["unreadCount"] = unread
             row["read"] = unread == 0
+            row["contactName"] = names[key]
             row
         }
     }
 
     private fun conversationKey(address: String): String {
-        val digits = PhoneNormalizer.normalize(address).filter { it.isDigit() }
-        return if (digits.length >= 10) digits.takeLast(10) else digits.ifEmpty { address.trim() }
+        return PhoneNormalizer.matchKey(address).ifEmpty { address.trim() }
     }
 
     fun threadMessages(address: String, limit: Int = 200): List<Map<String, Any?>> {

@@ -221,6 +221,17 @@ class CallBridge {
         .toList();
   }
 
+  static Future<String?> resolveContactName(String address) async {
+    if (address.trim().isEmpty) return null;
+    final result = await _methods.invokeMethod<dynamic>('resolveContactName', {
+      'address': address,
+    });
+    if (result is! Map) return null;
+    final name = result['name']?.toString().trim();
+    if (name == null || name.isEmpty) return null;
+    return name;
+  }
+
   static Future<bool> isDefaultSmsApp() async {
     final result = await _methods.invokeMethod<dynamic>('isDefaultSmsApp');
     return (result as Map)['isDefault'] == true;

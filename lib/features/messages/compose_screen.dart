@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../branding.dart';
 import '../../bridge/call_bridge.dart';
+import '../../contacts/contact_display.dart';
 import '../../widgets/app_ui.dart';
 import 'sms_permission_help.dart';
 import 'thread_screen.dart';
@@ -110,9 +111,14 @@ class _ComposeScreenState extends State<ComposeScreen> {
         _body.clear();
         await _bootstrap();
         if (!mounted) return;
+        final contactName = await CallBridge.resolveContactName(address);
+        if (!mounted) return;
         await Navigator.of(context).push(
           MaterialPageRoute<void>(
-            builder: (_) => ThreadScreen(address: address),
+            builder: (_) => ThreadScreen(
+              address: address,
+              contactName: contactName,
+            ),
           ),
         );
         await _refreshConversations();
@@ -237,23 +243,35 @@ class _ComposeScreenState extends State<ComposeScreen> {
         else
           ..._conversations.map((c) {
             final address = c['address']?.toString() ?? '';
+            final contactName = c['contactName']?.toString().trim();
+            final title = ContactDisplay.title(c);
+            final numberSubtitle = ContactDisplay.subtitleNumber(c);
             final type = c['type']?.toString();
             final body = c['body']?.toString() ?? '';
             final preview = type == 'sent' ? 'You: $body' : body;
+            final subtitle = [
+              ?numberSubtitle,
+              if (preview.isNotEmpty) preview,
+            ].join(' · ');
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
               child: ListTile(
                 leading: CircleAvatar(
                   backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                  child: Icon(
-                    Icons.chat_bubble_outline_rounded,
-                    size: 18,
-                    color: theme.colorScheme.onSurfaceVariant,
+                  foregroundColor: theme.colorScheme.onSurfaceVariant,
+                  child: Text(
+                    ContactDisplay.avatarLetter(
+                      name: contactName,
+                      address: address,
+                    ),
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-                title: Text(address),
+                title: Text(title),
                 subtitle: Text(
-                  preview,
+                  subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -261,7 +279,10 @@ class _ComposeScreenState extends State<ComposeScreen> {
                 onTap: () async {
                   await Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) => ThreadScreen(address: address),
+                      builder: (_) => ThreadScreen(
+                        address: address,
+                        contactName: contactName,
+                      ),
                     ),
                   );
                   await _refreshConversations();

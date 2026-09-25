@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../bridge/call_bridge.dart';
+import '../../contacts/contact_display.dart';
 import '../../widgets/app_ui.dart';
 import 'sms_permission_help.dart';
 import 'thread_screen.dart';
@@ -156,6 +157,7 @@ class _InboxScreenState extends State<InboxScreen> {
 
   Future<void> _openThread(Map<String, dynamic> m) async {
     final address = m['address']?.toString() ?? '';
+    final contactName = m['contactName']?.toString();
     final isRead = m['read'] == true;
     if (!isRead) {
       await _setThreadRead(m, true, silent: true);
@@ -163,7 +165,10 @@ class _InboxScreenState extends State<InboxScreen> {
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => ThreadScreen(address: address),
+        builder: (_) => ThreadScreen(
+          address: address,
+          contactName: contactName,
+        ),
       ),
     );
     await _load();
@@ -225,11 +230,14 @@ class _InboxScreenState extends State<InboxScreen> {
           }
           final m = _items[_defaultSms ? index : index - 1];
           final address = m['address']?.toString() ?? '';
+          final contactName = m['contactName']?.toString().trim();
+          final title = ContactDisplay.title(m);
+          final numberSubtitle = ContactDisplay.subtitleNumber(m);
           final isRead = m['read'] == true;
-          final digits = address.replaceAll(RegExp(r'\D'), '');
-          final avatarLetter = digits.isNotEmpty
-              ? digits[digits.length - 1]
-              : (address.isNotEmpty ? address[0] : '?');
+          final avatarLetter = ContactDisplay.avatarLetter(
+            name: contactName,
+            address: address,
+          );
 
           return Material(
             color: Colors.transparent,
@@ -289,7 +297,7 @@ class _InboxScreenState extends State<InboxScreen> {
                             children: [
                               Expanded(
                                 child: Text(
-                                  address,
+                                  title,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: theme.textTheme.titleSmall?.copyWith(
@@ -325,6 +333,17 @@ class _InboxScreenState extends State<InboxScreen> {
                               ),
                             ],
                           ),
+                          if (numberSubtitle != null) ...[
+                            const SizedBox(height: 1),
+                            Text(
+                              numberSubtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 2),
                           Row(
                             children: [

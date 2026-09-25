@@ -197,6 +197,10 @@ class CallVaultBridge(
                 val limit = call.argument<Int>("limit") ?: 500
                 result.success(smsHelper.listContacts(limit))
             }
+            "resolveContactName" -> {
+                val address = call.argument<String>("address") ?: ""
+                result.success(mapOf("name" to smsHelper.resolveContactName(address)))
+            }
             "isDefaultSmsApp" -> result.success(mapOf("isDefault" to smsHelper.isDefaultSmsApp()))
             "requestDefaultSmsRole" -> result.success(mapOf("requested" to smsHelper.requestDefaultSmsRole()))
             "openMmsComposer" -> {

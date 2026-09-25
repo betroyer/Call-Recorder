@@ -6,9 +6,14 @@ import '../../branding.dart';
 import '../../bridge/call_bridge.dart';
 
 class ThreadScreen extends StatefulWidget {
-  const ThreadScreen({super.key, required this.address});
+  const ThreadScreen({
+    super.key,
+    required this.address,
+    this.contactName,
+  });
 
   final String address;
+  final String? contactName;
 
   @override
   State<ThreadScreen> createState() => _ThreadScreenState();
@@ -19,11 +24,15 @@ class _ThreadScreenState extends State<ThreadScreen> {
   final _reply = TextEditingController();
   final _scroll = ScrollController();
   bool _sending = false;
+  String? _contactName;
   StreamSubscription<Map<String, dynamic>>? _eventsSub;
 
   @override
   void initState() {
     super.initState();
+    _contactName = widget.contactName?.trim().isNotEmpty == true
+        ? widget.contactName!.trim()
+        : null;
     CallBridge.listen();
     _eventsSub = CallBridge.events.listen((e) {
       if (e['type'] == 'onSmsChanged') {
@@ -33,7 +42,15 @@ class _ThreadScreenState extends State<ThreadScreen> {
         }
       }
     });
+    _resolveName();
     _load(markRead: true);
+  }
+
+  Future<void> _resolveName() async {
+    if (_contactName != null) return;
+    final name = await CallBridge.resolveContactName(widget.address);
+    if (!mounted || name == null) return;
+    setState(() => _contactName = name);
   }
 
   @override
@@ -124,7 +141,24 @@ class _ThreadScreenState extends State<ThreadScreen> {
     return Scaffold(
       backgroundColor: scheme.surface,
       appBar: AppBar(
-        title: Text(widget.address),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _contactName ?? widget.address,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (_contactName != null)
+              Text(
+                widget.address,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+          ],
+        ),
         actions: [
           PopupMenuButton<String>(
             onSelected: (value) {
