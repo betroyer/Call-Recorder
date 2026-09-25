@@ -66,21 +66,34 @@ object SmsSentWaiters {
             "Blocked by Fixed Dialing Numbers (FDN) on this SIM."
         // RESULT_MODEM_ERROR = 16 (API 30+)
         16 ->
-            "Modem error (code 16). Try: pick the correct SIM in Message, " +
+            "Modem error (code 16). Pick the SIM with load under Send via, " +
                 "toggle Airplane mode, end any call, then retry. " +
-                "Also set CallVault as default SMS app."
+                "Set PYX Food Products as the default SMS app."
         // RESULT_NETWORK_ERROR = 17
         17 ->
             "Network rejected the SMS (code 17). Check signal and try again."
         // RESULT_INVALID_SMSC_ADDRESS = 19
         19 ->
             "Invalid SMS center (SMSC) on this SIM — contact your carrier."
-        // RESULT_NO_DEFAULT_SMS_APP = 32 / varies — also map common RIL
+        // RESULT_NO_DEFAULT_SMS_APP
         32 ->
-            "No default SMS app — set CallVault as the default SMS app."
+            "No default SMS app — set PYX Food Products as the default SMS app."
+        // Common OEM RIL busy / send-fail-retry (seen as 124 on many PH devices)
+        124, 111, 105 ->
+            "Modem busy (code $resultCode). The radio is overloaded or the wrong SIM " +
+                "has no load. Wait a few seconds, choose the SIM with load (or Auto), " +
+                "set PYX Food Products as default SMS, then retry. Large blasts are paced slower now."
         else ->
-            "Send failed (code $resultCode). Check SIM, signal, correct SIM slot, and default SMS app."
+            "Send failed (code $resultCode). Check SIM load, signal, correct SIM slot, " +
+                "and set PYX Food Products as the default SMS app."
     }
+
+    fun isTransientModemError(resultCode: Int): Boolean =
+        resultCode == 16 ||
+            resultCode == 17 ||
+            resultCode == SmsManager.RESULT_ERROR_GENERIC_FAILURE ||
+            resultCode == SmsManager.RESULT_ERROR_LIMIT_EXCEEDED ||
+            resultCode in 100..130
 }
 
 /**

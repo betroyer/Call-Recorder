@@ -369,7 +369,7 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
           'Will send to: $unique unique'
           '${dupes > 0 ? ' ($dupes duplicate${dupes == 1 ? '' : 's'} skipped)' : ''}\n\n'
           '${_attempt > 0 ? 'Tagged as ${_attemptLabel(_attempt)} (undelivered-order follow-up).\n\n' : ''}'
-          'No recipient limit — large blasts are paced (~400ms apart). '
+          'No recipient limit — large blasts are paced (~1s apart, slower after failures). '
           'Carriers may still rate-limit or fail some numbers. Continue?',
         ),
         actions: [
@@ -451,14 +451,15 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
     if (!await _confirmRateLimit(pasted.length, recipients.length)) return;
 
     final branded = AppBrand.brandMessage(body);
-    final allSims = _subscriptionId < 0;
+    // Auto (-1): native picks last-OK SIM and fails over. Do NOT alternate SIMs.
+    final allSims = false;
 
     if (_scheduledAt != null && _scheduledAt!.isAfter(DateTime.now().add(const Duration(seconds: 5)))) {
       final result = await CallBridge.scheduleSmsBlast(
         addresses: recipients,
         body: branded,
         triggerAtMs: _scheduledAt!.millisecondsSinceEpoch,
-        subscriptionId: allSims ? -1 : _subscriptionId,
+        subscriptionId: _subscriptionId,
         allSims: allSims,
         priority: _priority,
       );
@@ -475,10 +476,10 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
       return;
     }
 
-    await _doSend(recipients, branded, allSims);
+    await _doSend(recipients, branded);
   }
 
-  Future<void> _doSend(List<String> recipients, String body, bool allSims) async {
+  Future<void> _doSend(List<String> recipients, String body) async {
     final blastId = const Uuid().v4();
     setState(() {
       _sending = true;
@@ -493,8 +494,8 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
       final result = await CallBridge.sendSmsBlast(
         addresses: recipients,
         body: body,
-        subscriptionId: allSims ? -1 : _subscriptionId,
-        allSims: allSims,
+        subscriptionId: _subscriptionId,
+        allSims: false,
         blastId: blastId,
       );
       final results = (result['results'] as List?)
@@ -861,7 +862,7 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
             '${_scheduledAt!.minute.toString().padLeft(2, '0')}';
 
     final simItems = _sims.isEmpty
-        ? [const DropdownMenuItem(value: -1, child: Text('Auto — try SIM with load'))]
+        ? [const DropdownMenuItem(value: -1, child: Text('Auto — SIM with load + failover'))]
         : _sims
             .map(
               (s) => DropdownMenuItem(
@@ -1040,6 +1041,7 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
               child: InputDecorator(
                 decoration: const InputDecoration(
                   labelText: 'Send via',
+                  helperText: 'Use Auto or the SIM with load — avoids code 16/124',
                   border: OutlineInputBorder(),
                   contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 ),

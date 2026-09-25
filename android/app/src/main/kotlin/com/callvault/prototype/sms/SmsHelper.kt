@@ -152,6 +152,7 @@ class SmsHelper(private val activity: Activity) {
             SmsManager.RESULT_ERROR_RADIO_OFF,
             16, // RESULT_MODEM_ERROR
             17, // RESULT_NETWORK_ERROR
+            124, 111, 105,
             -> true
             else -> resultCode in 100..130 // many RESULT_RIL_* codes
         }
@@ -340,7 +341,7 @@ class SmsHelper(private val activity: Activity) {
         } catch (e: SecurityException) {
             mapOf(
                 "ok" to false,
-                "error" to "Blocked — set CallVault as default SMS app to change read state",
+                "error" to "Blocked — set PYX Food Products as default SMS app to change read state",
             )
         } catch (e: Exception) {
             mapOf("ok" to false, "error" to (e.message ?: "update failed"))
@@ -377,7 +378,7 @@ class SmsHelper(private val activity: Activity) {
         } catch (e: SecurityException) {
             mapOf(
                 "ok" to false,
-                "error" to "Blocked — set CallVault as default SMS app to change read state",
+                "error" to "Blocked — set PYX Food Products as default SMS app to change read state",
             )
         } catch (e: Exception) {
             mapOf("ok" to false, "error" to (e.message ?: "update failed"))
@@ -619,6 +620,23 @@ class SmsHelper(private val activity: Activity) {
         body: String,
         subscriptionId: Int,
     ): Map<String, Any?> {
+        val first = sendSmsOnSubscriptionOnce(normalized, body, subscriptionId)
+        if (first["ok"] == true) return first
+        val code = (first["resultCode"] as? Number)?.toInt() ?: -1
+        if (!SmsSentWaiters.isTransientModemError(code)) return first
+        // Modem often needs a short cool-down before the next SMS (esp. UCS-2 multiparts).
+        try {
+            Thread.sleep(900)
+        } catch (_: InterruptedException) {
+        }
+        return sendSmsOnSubscriptionOnce(normalized, body, subscriptionId)
+    }
+
+    private fun sendSmsOnSubscriptionOnce(
+        normalized: String,
+        body: String,
+        subscriptionId: Int,
+    ): Map<String, Any?> {
         return try {
             val sms = smsManagerFor(subscriptionId)
             val code = requestCode.incrementAndGet()
@@ -756,9 +774,11 @@ class SmsHelper(private val activity: Activity) {
         var sent = 0
         var failed = 0
         var cancelled = false
+        var consecutiveFails = 0
         val results = mutableListOf<Map<String, Any?>>()
 
-        cleaned.forEachIndexed { index, address ->
+        for (index in cleaned.indices) {
+            val address = cleaned[index]
             if (cancelFlag.get()) {
                 cancelled = true
                 onProgress?.invoke(
@@ -775,17 +795,26 @@ class SmsHelper(private val activity: Activity) {
                         "cancelled" to true,
                     ),
                 )
-                return@forEachIndexed
+                break
             }
+            // Auto (-1): let sendSms pick last-OK SIM + failover.
+            // Explicit SIM: use that slot only.
+            // allSims: optional round-robin (legacy) — prefer Auto for load.
             val subId = when {
                 subscriptionId >= 0 -> subscriptionId
-                allSims && simIds.isNotEmpty() -> simIds[index % simIds.size]
+                allSims && simIds.size > 1 -> simIds[index % simIds.size]
                 else -> -1
             }
             val result = sendSms(address, body, subId).toMutableMap()
             result["index"] = index
             results.add(result)
-            if (result["ok"] == true) sent++ else failed++
+            if (result["ok"] == true) {
+                sent++
+                consecutiveFails = 0
+            } else {
+                failed++
+                consecutiveFails++
+            }
 
             onProgress?.invoke(
                 mapOf(
@@ -802,14 +831,20 @@ class SmsHelper(private val activity: Activity) {
                     "cancelled" to false,
                 ),
             )
+            // Pace blasts so the modem can keep up (codes 16/124 = busy/overloaded).
+            val delayMs = when {
+                consecutiveFails >= 5 -> 2800L
+                consecutiveFails >= 2 -> 1800L
+                result["ok"] != true -> 1400L
+                else -> 1000L
+            }
             try {
-                Thread.sleep(400)
+                Thread.sleep(delayMs)
             } catch (_: InterruptedException) {
             }
         }
 
         if (cancelled) {
-            // Mark remaining as skipped
             for (i in results.size until cleaned.size) {
                 results.add(
                     mapOf(
