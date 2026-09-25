@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 
 import '../../bridge/call_bridge.dart';
 import '../../contacts/contact_display.dart';
+import '../../contacts/sms_address_kind.dart';
 import '../../widgets/app_ui.dart';
 import 'sms_permission_help.dart';
 import 'thread_screen.dart';
+
+enum _InboxScope { people, contacts, unread, today, all }
 
 /// Conversation inbox: shows both your sent messages and customer replies.
 class InboxScreen extends StatefulWidget {
@@ -20,6 +23,8 @@ class _InboxScreenState extends State<InboxScreen> {
   List<Map<String, dynamic>> _items = const [];
   final _search = TextEditingController();
   String _query = '';
+  /// Default hides TNT / GCash / short-code promo senders.
+  _InboxScope _scope = _InboxScope.people;
   bool _loading = true;
   String? _error;
   bool _smsRead = false;
@@ -50,11 +55,29 @@ class _InboxScreenState extends State<InboxScreen> {
     super.dispose();
   }
 
+  List<Map<String, dynamic>> get _scoped {
+    switch (_scope) {
+      case _InboxScope.people:
+        return _items
+            .where((m) => SmsAddressKind.isLikelyPerson(m['address']?.toString()))
+            .toList();
+      case _InboxScope.contacts:
+        return _items.where(SmsAddressKind.isInContacts).toList();
+      case _InboxScope.unread:
+        return _items.where(SmsAddressKind.isUnread).toList();
+      case _InboxScope.today:
+        return _items.where(SmsAddressKind.isToday).toList();
+      case _InboxScope.all:
+        return _items;
+    }
+  }
+
   List<Map<String, dynamic>> get _filtered {
+    final base = _scoped;
     final q = _query.trim().toLowerCase();
-    if (q.isEmpty) return _items;
+    if (q.isEmpty) return base;
     final qDigits = q.replaceAll(RegExp(r'\D'), '');
-    return _items.where((m) {
+    return base.where((m) {
       final name = m['contactName']?.toString().toLowerCase() ?? '';
       final address = m['address']?.toString().toLowerCase() ?? '';
       final body = m['body']?.toString().toLowerCase() ?? '';
@@ -67,6 +90,55 @@ class _InboxScreenState extends State<InboxScreen> {
       }
       return false;
     }).toList();
+  }
+
+  String get _scopeEmptyTitle => switch (_scope) {
+        _InboxScope.people => 'No people chats here',
+        _InboxScope.contacts => 'No contact chats',
+        _InboxScope.unread => 'No unread chats',
+        _InboxScope.today => 'Nothing today',
+        _InboxScope.all => 'No conversations yet',
+      };
+
+  String get _scopeEmptyMessage => switch (_scope) {
+        _InboxScope.people =>
+          'Promo senders like TNT / GCash are hidden. Switch to All to see everything.',
+        _InboxScope.contacts =>
+          'Only numbers saved in Contacts appear here. Save a customer, or switch to People.',
+        _InboxScope.unread => 'You’re caught up — or switch to People / All.',
+        _InboxScope.today => 'No SMS activity today under this filter.',
+        _InboxScope.all =>
+          'Send from Message, or wait for a customer reply — both appear here.',
+      };
+
+  Widget _scopeChips() {
+    Widget chip(_InboxScope scope, String label) {
+      final selected = _scope == scope;
+      return Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: FilterChip(
+          label: Text(label),
+          selected: selected,
+          showCheckmark: false,
+          onSelected: (_) => setState(() => _scope = scope),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 40,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+        children: [
+          chip(_InboxScope.people, 'People'),
+          chip(_InboxScope.contacts, 'Contacts'),
+          chip(_InboxScope.unread, 'Unread'),
+          chip(_InboxScope.today, 'Today'),
+          chip(_InboxScope.all, 'All'),
+        ],
+      ),
+    );
   }
 
   Future<void> _load({bool silent = false}) async {
@@ -449,6 +521,7 @@ class _InboxScreenState extends State<InboxScreen> {
     return Column(
       children: [
         _searchBar(theme, scheme),
+        _scopeChips(),
         Expanded(
           child: RefreshIndicator(
             onRefresh: () => _load(),
@@ -458,11 +531,13 @@ class _InboxScreenState extends State<InboxScreen> {
                     children: [
                       if (showBanner) _defaultSmsBanner(),
                       AppEmptyState(
-                        icon: Icons.search_off_rounded,
-                        title: 'No matches',
+                        icon: searching
+                            ? Icons.search_off_rounded
+                            : Icons.filter_alt_outlined,
+                        title: searching ? 'No matches' : _scopeEmptyTitle,
                         message: searching
                             ? 'Nothing matched “${_query.trim()}”. Try a name, number, or word from the last message.'
-                            : null,
+                            : _scopeEmptyMessage,
                         action: searching
                             ? TextButton(
                                 onPressed: () {
@@ -471,7 +546,17 @@ class _InboxScreenState extends State<InboxScreen> {
                                 },
                                 child: const Text('Clear search'),
                               )
-                            : null,
+                            : _scope != _InboxScope.people
+                                ? TextButton(
+                                    onPressed: () =>
+                                        setState(() => _scope = _InboxScope.people),
+                                    child: const Text('Show People'),
+                                  )
+                                : TextButton(
+                                    onPressed: () =>
+                                        setState(() => _scope = _InboxScope.all),
+                                    child: const Text('Show All'),
+                                  ),
                       ),
                     ],
                   )
