@@ -47,15 +47,9 @@ class SmsHelperApp(private val context: Context) {
             SmsSentWaiters.armSent(code, partCount)
 
             val sentIntents = ArrayList<PendingIntent>(partCount)
-            val delIntents = ArrayList<PendingIntent>(partCount)
             repeat(partCount) { index ->
-                val sentIntent = Intent(SmsHelper.ACTION_SMS_SENT).apply {
-                    setPackage(context.packageName)
-                    putExtra("address", normalized)
-                    putExtra(SmsStatusReceiver.EXTRA_REQUEST_CODE, code)
-                }
-                val delIntent = Intent(SmsHelper.ACTION_SMS_DELIVERED).apply {
-                    setPackage(context.packageName)
+                val sentIntent = Intent(context, SmsStatusReceiver::class.java).apply {
+                    action = SmsHelper.ACTION_SMS_SENT
                     putExtra("address", normalized)
                     putExtra(SmsStatusReceiver.EXTRA_REQUEST_CODE, code)
                 }
@@ -67,20 +61,12 @@ class SmsHelperApp(private val context: Context) {
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
                     ),
                 )
-                delIntents.add(
-                    PendingIntent.getBroadcast(
-                        context,
-                        code * 10 + index + 500_000,
-                        delIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
-                    ),
-                )
             }
 
             if (partCount > 1 && parts != null) {
-                sms.sendMultipartTextMessage(normalized, null, parts, sentIntents, delIntents)
+                sms.sendMultipartTextMessage(normalized, null, parts, sentIntents, null)
             } else {
-                sms.sendTextMessage(normalized, null, body, sentIntents[0], delIntents[0])
+                sms.sendTextMessage(normalized, null, body, sentIntents[0], null)
             }
 
             val outcome = SmsSentWaiters.awaitSent(code)
@@ -93,6 +79,7 @@ class SmsHelperApp(private val context: Context) {
                     "resultCode" to outcome.resultCode,
                     "noDefault" to outcome.noDefault,
                     "errorCode" to outcome.errorCode,
+                    "timedOut" to outcome.timedOut,
                 )
             }
 

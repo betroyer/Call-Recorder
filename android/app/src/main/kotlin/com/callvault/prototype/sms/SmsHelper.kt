@@ -648,35 +648,72 @@ class SmsHelper(private val activity: Activity) {
         body: String,
         subscriptionId: Int,
     ): Map<String, Any?> {
-        val first = sendSmsOnSubscriptionOnce(normalized, body, subscriptionId)
-        if (first["ok"] == true) return first
-        val code = (first["resultCode"] as? Number)?.toInt() ?: -1
-        if (!SmsSentWaiters.isTransientModemError(code)) return first
-        // Modem often needs a short cool-down before the next SMS (esp. UCS-2 multiparts).
-        try {
-            Thread.sleep(900)
-        } catch (_: InterruptedException) {
+        val addresses = addressSendVariants(normalized)
+        var last: Map<String, Any?> = mapOf(
+            "ok" to false,
+            "status" to "failed",
+            "error" to "Send failed",
+            "address" to normalized,
+        )
+        for (addr in addresses) {
+            val first = sendSmsOnSubscriptionOnce(addr, body, subscriptionId)
+            if (first["ok"] == true) {
+                return first + mapOf("address" to normalized, "sentAs" to addr)
+            }
+            last = first
+            val code = (first["resultCode"] as? Number)?.toInt() ?: -1
+            val timedOut = first["timedOut"] == true
+            if (!timedOut && !SmsSentWaiters.isTransientModemError(code)) {
+                // Permanent failure for this address form — still try next format.
+                continue
+            }
+            try {
+                Thread.sleep(if (timedOut) 500 else 900)
+            } catch (_: InterruptedException) {
+            }
+            val second = sendSmsOnSubscriptionOnce(addr, body, subscriptionId)
+            if (second["ok"] == true) {
+                return second + mapOf("address" to normalized, "sentAs" to addr)
+            }
+            last = second
         }
-        return sendSmsOnSubscriptionOnce(normalized, body, subscriptionId)
+        return last + mapOf("address" to normalized)
+    }
+
+    /** Formats Realme/Globe often accept: +63…, 09…, 63… */
+    private fun addressSendVariants(normalized: String): List<String> {
+        val digits = normalized.filter { it.isDigit() }
+        val out = linkedSetOf<String>()
+        if (normalized.isNotBlank()) out.add(normalized)
+        if (digits.length == 12 && digits.startsWith("63")) {
+            out.add("+$digits")
+            out.add("0${digits.substring(2)}")
+            out.add(digits)
+        } else if (digits.length == 11 && digits.startsWith("09")) {
+            out.add(digits)
+            out.add("+63${digits.substring(1)}")
+            out.add("63${digits.substring(1)}")
+        } else if (digits.length == 10 && digits.startsWith("9")) {
+            out.add("0$digits")
+            out.add("+63$digits")
+            out.add("63$digits")
+        }
+        return out.toList()
     }
 
     private fun sendSmsOnSubscriptionOnce(
-        normalized: String,
+        destination: String,
         body: String,
         subscriptionId: Int,
     ): Map<String, Any?> {
         return try {
             val resolvedSub = resolveConcreteSubscriptionId(subscriptionId)
-            // Even if subscription id is unknown, still attempt send via getDefault()
-            // on single-SIM phones (Realme C100i + Globe).
             val sms = smsManagerFor(if (resolvedSub >= 0) resolvedSub else subscriptionId)
             val code = requestCode.incrementAndGet()
             val parts = sms.divideMessage(body)
             val partCount = if (parts != null && parts.size > 1) parts.size else 1
             SmsSentWaiters.armSent(code, partCount)
-            SmsSentWaiters.armDelivered(code)
 
-            // Dynamic receiver: ColorOS sometimes delays/drops exported=false manifest delivery.
             val liveReceiver = object : BroadcastReceiver() {
                 override fun onReceive(context: Context?, intent: Intent?) {
                     val action = intent?.action ?: return
@@ -684,18 +721,12 @@ class SmsHelper(private val activity: Activity) {
                     if (req != code) return
                     val noDefault = intent.getBooleanExtra("noDefault", false)
                     val errorCode = intent.getIntExtra("errorCode", -1)
-                    when (action) {
-                        ACTION_SMS_SENT ->
-                            SmsSentWaiters.completeSent(req, resultCode, noDefault, errorCode)
-                        ACTION_SMS_DELIVERED ->
-                            SmsSentWaiters.completeDelivered(req, resultCode)
+                    if (action == ACTION_SMS_SENT) {
+                        SmsSentWaiters.completeSent(req, resultCode, noDefault, errorCode)
                     }
                 }
             }
-            val filter = IntentFilter().apply {
-                addAction(ACTION_SMS_SENT)
-                addAction(ACTION_SMS_DELIVERED)
-            }
+            val filter = IntentFilter(ACTION_SMS_SENT)
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     activity.registerReceiver(liveReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -707,18 +738,12 @@ class SmsHelper(private val activity: Activity) {
             }
 
             val sentIntents = ArrayList<PendingIntent>(partCount)
-            val delIntents = ArrayList<PendingIntent>(partCount)
             val piFlags = smsPendingIntentFlags()
             repeat(partCount) { index ->
-                val sentIntent = Intent(ACTION_SMS_SENT).apply {
-                    setPackage(activity.packageName)
-                    putExtra("address", normalized)
-                    putExtra(SmsStatusReceiver.EXTRA_REQUEST_CODE, code)
-                    putExtra("partIndex", index)
-                }
-                val delIntent = Intent(ACTION_SMS_DELIVERED).apply {
-                    setPackage(activity.packageName)
-                    putExtra("address", normalized)
+                // Explicit component — ColorOS often drops package-only implicit PIs.
+                val sentIntent = Intent(activity, SmsStatusReceiver::class.java).apply {
+                    action = ACTION_SMS_SENT
+                    putExtra("address", destination)
                     putExtra(SmsStatusReceiver.EXTRA_REQUEST_CODE, code)
                     putExtra("partIndex", index)
                 }
@@ -730,43 +755,38 @@ class SmsHelper(private val activity: Activity) {
                         piFlags,
                     ),
                 )
-                delIntents.add(
-                    PendingIntent.getBroadcast(
-                        activity,
-                        code * 10 + index + 500_000,
-                        delIntent,
-                        piFlags,
-                    ),
-                )
             }
 
             try {
+                // Null deliveryIntent: delivery reports break send on some Realme builds.
                 if (partCount > 1 && parts != null) {
-                    sms.sendMultipartTextMessage(normalized, null, parts, sentIntents, delIntents)
+                    sms.sendMultipartTextMessage(destination, null, parts, sentIntents, null)
                 } else {
-                    sms.sendTextMessage(normalized, null, body, sentIntents[0], delIntents[0])
+                    sms.sendTextMessage(destination, null, body, sentIntents[0], null)
                 }
 
-                val outcome = SmsSentWaiters.awaitSent(code)
+                val timeoutMs = if (isAggressiveOem()) 35_000L else 45_000L
+                val outcome = SmsSentWaiters.awaitSent(code, timeoutMs)
                 if (outcome.resultCode != android.app.Activity.RESULT_OK) {
                     return mapOf(
                         "ok" to false,
                         "status" to "failed",
                         "error" to SmsSentWaiters.sentErrorMessage(outcome),
-                        "address" to normalized,
+                        "address" to destination,
                         "resultCode" to outcome.resultCode,
                         "noDefault" to outcome.noDefault,
                         "errorCode" to outcome.errorCode,
+                        "timedOut" to outcome.timedOut,
                         "subscriptionId" to resolvedSub,
                     )
                 }
 
-                writeToSentBox(normalized, body)
+                writeToSentBox(destination, body)
                 SmsEventHub.emit(
                     mapOf(
                         "type" to "onSmsChanged",
                         "reason" to "sent",
-                        "address" to normalized,
+                        "address" to destination,
                         "body" to body,
                         "dateMs" to System.currentTimeMillis(),
                         "subscriptionId" to resolvedSub,
@@ -775,7 +795,7 @@ class SmsHelper(private val activity: Activity) {
                 mapOf(
                     "ok" to true,
                     "status" to "sent",
-                    "address" to normalized,
+                    "address" to destination,
                     "subscriptionId" to resolvedSub,
                     "error" to null,
                 )
@@ -790,7 +810,7 @@ class SmsHelper(private val activity: Activity) {
                 "ok" to false,
                 "status" to "failed",
                 "error" to (e.message ?: "send failed"),
-                "address" to normalized,
+                "address" to destination,
                 "subscriptionId" to subscriptionId,
                 "resultCode" to SmsManager.RESULT_ERROR_GENERIC_FAILURE,
             )

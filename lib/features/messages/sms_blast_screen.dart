@@ -654,12 +654,23 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
       if (!mounted) return;
       final sent = result['sent'];
       final failed = result['failed'];
+      String? firstErr;
+      for (final r in results) {
+        if (r['ok'] == true) continue;
+        final err = r['error']?.toString();
+        if (err != null && err.isNotEmpty) {
+          firstErr = err;
+          break;
+        }
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
+          duration: const Duration(seconds: 8),
           content: Text(
             '${_attempt > 0 ? '${_attemptLabel(_attempt)} · ' : ''}'
             'Blast ${result['cancelled'] == true ? 'cancelled' : 'done'} · '
-            'sent $sent · failed $failed · total ${recipients.length}',
+            'sent $sent · failed $failed'
+            '${firstErr != null ? '\n$firstErr' : ''}',
           ),
         ),
       );
@@ -1332,14 +1343,34 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
           const SizedBox(height: 12),
           Text('Last blast status', style: theme.textTheme.titleSmall),
           ..._lastResults.take(20).map(
-                (r) => ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text('${r['address']}'),
-                  trailing: Text(
-                    '${r['status'] ?? (r['ok'] == true ? 'sent' : 'failed')}',
-                  ),
-                ),
+                (r) {
+                  final ok = r['ok'] == true;
+                  final err = r['error']?.toString();
+                  final code = r['resultCode'];
+                  return ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('${r['address']}'),
+                    subtitle: !ok && err != null && err.isNotEmpty
+                        ? Text(
+                            err,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: theme.colorScheme.error),
+                          )
+                        : null,
+                    trailing: Text(
+                      ok
+                          ? 'sent'
+                          : 'failed${code != null ? ' · $code' : ''}',
+                      style: TextStyle(
+                        color: ok
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.error,
+                      ),
+                    ),
+                  );
+                },
               ),
         ],
         _buildHistorySection(context),
