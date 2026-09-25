@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../branding.dart';
+
 /// Consistent empty / error / teaching state for operate screens.
 class AppEmptyState extends StatelessWidget {
   const AppEmptyState({
@@ -196,6 +198,41 @@ class StatusPill extends StatelessWidget {
                 ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class BrandLogo extends StatelessWidget {
+  const BrandLogo({super.key, this.size = 40});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipOval(
+      child: Image.asset(
+        AppBrand.logoAsset,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) {
+          final scheme = Theme.of(context).colorScheme;
+          return Container(
+            width: size,
+            height: size,
+            color: scheme.primary,
+            alignment: Alignment.center,
+            child: Text(
+              'P',
+              style: TextStyle(
+                color: scheme.onPrimary,
+                fontWeight: FontWeight.w700,
+                fontSize: size * 0.4,
+              ),
+            ),
+          );
+        },
       ),
     );
   }

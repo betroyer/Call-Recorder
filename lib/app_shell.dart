@@ -6,6 +6,7 @@ import 'features/messages/inbox_screen.dart';
 import 'features/messages/compose_screen.dart';
 import 'features/messages/sms_blast_screen.dart';
 import 'prototype/prototype_screen.dart';
+import 'widgets/app_ui.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -39,19 +40,9 @@ class _AppShellState extends State<AppShell> {
       appBar: AppBar(
         titleSpacing: 12,
         leadingWidth: 52,
-        leading: Padding(
-          padding: const EdgeInsets.only(left: 12),
-          child: CircleAvatar(
-            backgroundColor: theme.colorScheme.primary,
-            foregroundColor: theme.colorScheme.onPrimary,
-            child: Text(
-              'P',
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: theme.colorScheme.onPrimary,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
+        leading: const Padding(
+          padding: EdgeInsets.only(left: 10),
+          child: BrandLogo(size: 40),
         ),
         title: Text(_titles[_index]),
         actions: [

@@ -1,4 +1,4 @@
-/// Business branding for PYX Food Products.
+/// Business branding for PYX Food Products / PYXMedia.
 ///
 /// Note: Regular SIM SMS always shows your phone number as the "From" on the
 /// customer's phone. We brand the message body so they still see the company name.
@@ -6,6 +6,7 @@
 class AppBrand {
   static const String companyName = 'PYX Food Products';
   static const String appName = 'PYX Food Products';
+  static const String logoAsset = 'assets/brand/pyx_logo.png';
 
   /// Short ID for future SMS-gateway alphanumeric sender (max ~11 chars on many carriers).
   static const String smsSenderId = 'PYXFood';
