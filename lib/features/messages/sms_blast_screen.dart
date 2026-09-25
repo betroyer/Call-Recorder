@@ -714,6 +714,7 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final meta = _smsMeta(_message.text);
     final count = _parseNumbers(_numbers.text).length;
     final scheduleLabel = _scheduledAt == null
@@ -733,39 +734,8 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
             )
             .toList();
 
-    final numbersPane = Column(
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text('Recipients ($count)', style: Theme.of(context).textTheme.titleSmall),
-            ),
-            TextButton.icon(
-              onPressed: _pickContacts,
-              icon: const Icon(Icons.contacts, size: 18),
-              label: const Text('Contacts'),
-            ),
-          ],
-        ),
-        Expanded(
-          child: TextField(
-            controller: _numbers,
-            expands: true,
-            maxLines: null,
-            minLines: null,
-            textAlignVertical: TextAlignVertical.top,
-            decoration: const InputDecoration(
-              hintText: 'Mobile numbers (ex. 09178943492)',
-              border: OutlineInputBorder(),
-              alignLabelWithHint: true,
-            ),
-          ),
-        ),
-      ],
-    );
-
-    final messagePane = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 28),
       children: [
         if (!_smsSend)
           Padding(
@@ -785,39 +755,72 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
               },
             ),
           ),
-        Expanded(
-          child: TextField(
-            controller: _message,
-            expands: true,
-            maxLines: null,
-            minLines: null,
-            textAlignVertical: TextAlignVertical.top,
-            decoration: const InputDecoration(
-              hintText: 'SMS message',
-              border: OutlineInputBorder(),
-              alignLabelWithHint: true,
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Recipients ($count)',
+                style: theme.textTheme.titleSmall,
+              ),
             ),
+            TextButton.icon(
+              onPressed: _pickContacts,
+              icon: const Icon(Icons.contacts, size: 18),
+              label: const Text('Contacts'),
+            ),
+          ],
+        ),
+        TextField(
+          controller: _numbers,
+          minLines: 4,
+          maxLines: 8,
+          textAlignVertical: TextAlignVertical.top,
+          decoration: const InputDecoration(
+            hintText: 'Mobile numbers (ex. 09178943492)',
+            border: OutlineInputBorder(),
+            alignLabelWithHint: true,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text('Message', style: theme.textTheme.titleSmall),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _message,
+          minLines: 5,
+          maxLines: 10,
+          textAlignVertical: TextAlignVertical.top,
+          decoration: const InputDecoration(
+            hintText: 'SMS message',
+            border: OutlineInputBorder(),
+            alignLabelWithHint: true,
           ),
         ),
         const SizedBox(height: 8),
-        Text('${meta.chars} character  ${meta.pages} SMS page · $count recipient(s)'),
+        Text(
+          '${meta.chars} character · ${meta.pages} SMS page · $count recipient(s)',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
         const SizedBox(height: 8),
         QuickTemplatesBar(
           allowSave: true,
           getBodyForSave: () => _message.text,
           onSelect: (body) => setState(() => _message.text = body),
         ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            TextButton(
-              onPressed: () {
-                final recipients = _parseNumbers(_numbers.text);
-                CallBridge.openMmsComposer(addresses: recipients, body: _message.text);
-              },
-              child: const Text('Open MMS'),
-            ),
-          ],
+        const SizedBox(height: 4),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: () {
+              final recipients = _parseNumbers(_numbers.text);
+              CallBridge.openMmsComposer(
+                addresses: recipients,
+                body: _message.text,
+              );
+            },
+            child: const Text('Open MMS'),
+          ),
         ),
         const SizedBox(height: 8),
         Row(
@@ -863,28 +866,28 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
                 ),
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: InkWell(
-                onTap: _pickSchedule,
-                onLongPress: () => setState(() => _scheduledAt = null),
-                child: InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: 'Schedule later',
-                    labelStyle: TextStyle(color: Color(0xFF2E7D32)),
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-                  ),
-                  child: Text(scheduleLabel),
-                ),
-              ),
-            ),
           ],
+        ),
+        const SizedBox(height: 8),
+        InkWell(
+          onTap: _pickSchedule,
+          onLongPress: () => setState(() => _scheduledAt = null),
+          child: InputDecorator(
+            decoration: const InputDecoration(
+              labelText: 'Schedule later',
+              labelStyle: TextStyle(color: Color(0xFF2E7D32)),
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+            ),
+            child: Text(scheduleLabel),
+          ),
         ),
         if (_sending) ...[
           const SizedBox(height: 12),
           LinearProgressIndicator(
-            value: _progressTotal == 0 ? null : (_progressIndex + 1) / _progressTotal,
+            value: _progressTotal == 0
+                ? null
+                : (_progressIndex + 1) / _progressTotal,
           ),
           const SizedBox(height: 4),
           Text(
@@ -917,50 +920,20 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
         ),
         if (_lastResults.isNotEmpty) ...[
           const SizedBox(height: 12),
-          Text('Last blast status', style: Theme.of(context).textTheme.titleSmall),
-          SizedBox(
-            height: 120,
-            child: ListView.builder(
-              itemCount: _lastResults.length,
-              itemBuilder: (_, i) {
-                final r = _lastResults[i];
-                return ListTile(
+          Text('Last blast status', style: theme.textTheme.titleSmall),
+          ..._lastResults.take(20).map(
+                (r) => ListTile(
                   dense: true,
+                  contentPadding: EdgeInsets.zero,
                   title: Text('${r['address']}'),
-                  trailing: Text('${r['status'] ?? (r['ok'] == true ? 'sent' : 'failed')}'),
-                );
-              },
-            ),
-          ),
+                  trailing: Text(
+                    '${r['status'] ?? (r['ok'] == true ? 'sent' : 'failed')}',
+                  ),
+                ),
+              ),
         ],
         _buildHistorySection(context),
       ],
-    );
-
-    return Padding(
-      padding: const EdgeInsets.all(12),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final wide = constraints.maxWidth >= 700;
-          if (wide) {
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(flex: 2, child: numbersPane),
-                const SizedBox(width: 12),
-                Expanded(flex: 3, child: messagePane),
-              ],
-            );
-          }
-          return Column(
-            children: [
-              SizedBox(height: constraints.maxHeight * 0.28, child: numbersPane),
-              const SizedBox(height: 8),
-              Expanded(child: messagePane),
-            ],
-          );
-        },
-      ),
     );
   }
 }
