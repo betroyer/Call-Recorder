@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../branding.dart';
 import '../../bridge/call_bridge.dart';
+import 'quick_templates_bar.dart';
 
 class ThreadScreen extends StatefulWidget {
   const ThreadScreen({
@@ -252,36 +253,46 @@ class _ThreadScreenState extends State<ThreadScreen> {
             child: SafeArea(
               top: false,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _reply,
-                        decoration: const InputDecoration(
-                          hintText: 'Type a reply…',
-                          isDense: true,
-                        ),
-                        minLines: 1,
-                        maxLines: 4,
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) => _send(),
-                      ),
+                    QuickTemplatesBar(
+                      showHeader: false,
+                      allowDelete: false,
+                      onSelect: (body) => setState(() => _reply.text = body),
                     ),
-                    const SizedBox(width: 10),
-                    IconButton.filled(
-                      onPressed: _sending ? null : _send,
-                      style: IconButton.styleFrom(
-                        minimumSize: const Size(48, 48),
-                      ),
-                      icon: _sending
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.send_rounded),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _reply,
+                            decoration: const InputDecoration(
+                              hintText: 'Type a reply…',
+                              isDense: true,
+                            ),
+                            minLines: 1,
+                            maxLines: 4,
+                            textInputAction: TextInputAction.send,
+                            onSubmitted: (_) => _send(),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        IconButton.filled(
+                          onPressed: _sending ? null : _send,
+                          style: IconButton.styleFrom(
+                            minimumSize: const Size(48, 48),
+                          ),
+                          icon: _sending
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.send_rounded),
+                        ),
+                      ],
                     ),
                   ],
                 ),

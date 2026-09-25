@@ -6,6 +6,7 @@ import '../../branding.dart';
 import '../../bridge/call_bridge.dart';
 import '../../contacts/contact_display.dart';
 import '../../widgets/app_ui.dart';
+import 'quick_templates_bar.dart';
 import 'sms_permission_help.dart';
 import 'thread_screen.dart';
 
@@ -186,6 +187,12 @@ class _ComposeScreenState extends State<ComposeScreen> {
               child: Icon(Icons.edit_outlined),
             ),
           ),
+        ),
+        const SizedBox(height: 8),
+        QuickTemplatesBar(
+          allowSave: true,
+          getBodyForSave: () => _body.text,
+          onSelect: (body) => setState(() => _body.text = body),
         ),
         const SizedBox(height: 8),
         Text(

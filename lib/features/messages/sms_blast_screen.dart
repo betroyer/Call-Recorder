@@ -8,6 +8,7 @@ import '../../bridge/call_bridge.dart';
 import '../../database/app_database.dart';
 import '../../database/db.dart';
 import '../../widgets/app_ui.dart';
+import 'quick_templates_bar.dart';
 import 'sms_permission_help.dart';
 
 /// Multi-recipient SMS blast with progress, contacts, templates, history, schedule.
@@ -22,7 +23,6 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
   final _numbers = TextEditingController();
   final _message = TextEditingController();
   List<Map<String, dynamic>> _sims = const [];
-  List<SmsTemplate> _templates = const [];
   List<BlastJob> _history = const [];
   int _subscriptionId = -1;
   String _priority = 'Low';
@@ -82,7 +82,6 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
     _isDefaultSms = perms['defaultSms'] == true;
     try {
       _sims = await CallBridge.listSims();
-      _templates = await appDatabase.allTemplates();
       await _loadHistory();
     } catch (_) {}
     if (mounted) setState(() {});
@@ -318,31 +317,6 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
         );
       },
     );
-  }
-
-  Future<void> _saveTemplate() async {
-    final body = _message.text.trim();
-    if (body.isEmpty) return;
-    final titleCtrl = TextEditingController(text: body.length > 24 ? '${body.substring(0, 24)}…' : body);
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Save template'),
-        content: TextField(
-          controller: titleCtrl,
-          decoration: const InputDecoration(labelText: 'Title'),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
-        ],
-      ),
-    );
-    if (ok == true) {
-      await appDatabase.addTemplate(titleCtrl.text.trim().isEmpty ? 'Template' : titleCtrl.text.trim(), body);
-      await _bootstrap();
-    }
-    titleCtrl.dispose();
   }
 
   Future<void> _pickSchedule() async {
@@ -766,33 +740,15 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
         ),
         const SizedBox(height: 8),
         Text('${meta.chars} character  ${meta.pages} SMS page · $count recipient(s)'),
-        if (_templates.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 36,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                for (final t in _templates)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: InputChip(
-                      label: Text(t.title),
-                      onPressed: () => setState(() => _message.text = t.body),
-                      onDeleted: () async {
-                        await appDatabase.deleteTemplate(t.id);
-                        await _bootstrap();
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
+        const SizedBox(height: 8),
+        QuickTemplatesBar(
+          allowSave: true,
+          getBodyForSave: () => _message.text,
+          onSelect: (body) => setState(() => _message.text = body),
+        ),
         const SizedBox(height: 8),
         Row(
           children: [
-            TextButton(onPressed: _saveTemplate, child: const Text('Save template')),
             TextButton(
               onPressed: () {
                 final recipients = _parseNumbers(_numbers.text);
