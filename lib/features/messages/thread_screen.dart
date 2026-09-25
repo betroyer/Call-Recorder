@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../../branding.dart';
 import '../../bridge/call_bridge.dart';
 import 'quick_templates_bar.dart';
+import 'send_result.dart';
+import 'send_status_banner.dart';
 
 class ThreadScreen extends StatefulWidget {
   const ThreadScreen({
@@ -26,6 +28,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
   final _scroll = ScrollController();
   bool _sending = false;
   String? _contactName;
+  SendResult? _lastSend;
   StreamSubscription<Map<String, dynamic>>? _eventsSub;
 
   @override
@@ -109,18 +112,12 @@ class _ThreadScreenState extends State<ThreadScreen> {
         address: widget.address,
         body: AppBrand.brandMessage(body),
       );
-      if (result['ok'] == true) {
+      if (!mounted) return;
+      final sendResult = SendResult.fromMap(result);
+      setState(() => _lastSend = sendResult);
+      if (sendResult.ok) {
         _reply.clear();
         await _load();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Sent — synced to Inbox')),
-          );
-        }
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${result['error']}')),
-        );
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -191,7 +188,13 @@ class _ThreadScreenState extends State<ThreadScreen> {
                     itemCount: _messages.length,
                     itemBuilder: (context, index) {
                       final m = _messages[index];
-                      final mine = m['type']?.toString() == 'sent';
+                      final type = m['type']?.toString() ?? '';
+                      final mine = type == 'sent' ||
+                          type == 'failed' ||
+                          type == 'outbox' ||
+                          type == 'queued';
+                      final status = m['status']?.toString() ??
+                          (type == 'inbox' ? 'inbox' : type);
                       return Align(
                         alignment: mine
                             ? Alignment.centerRight
@@ -200,46 +203,67 @@ class _ThreadScreenState extends State<ThreadScreen> {
                           constraints: BoxConstraints(
                             maxWidth: MediaQuery.sizeOf(context).width * 0.78,
                           ),
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(vertical: 4),
-                            padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-                            decoration: BoxDecoration(
-                              color: mine
-                                  ? scheme.primary
-                                  : Colors.white,
-                              borderRadius: BorderRadius.only(
-                                topLeft: const Radius.circular(16),
-                                topRight: const Radius.circular(16),
-                                bottomLeft: Radius.circular(mine ? 16 : 4),
-                                bottomRight: Radius.circular(mine ? 4 : 16),
+                          child: Column(
+                            crossAxisAlignment: mine
+                                ? CrossAxisAlignment.end
+                                : CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                margin: const EdgeInsets.symmetric(vertical: 4),
+                                padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+                                decoration: BoxDecoration(
+                                  color: type == 'failed'
+                                      ? scheme.errorContainer
+                                      : mine
+                                          ? scheme.primary
+                                          : Colors.white,
+                                  borderRadius: BorderRadius.only(
+                                    topLeft: const Radius.circular(16),
+                                    topRight: const Radius.circular(16),
+                                    bottomLeft: Radius.circular(mine ? 16 : 4),
+                                    bottomRight: Radius.circular(mine ? 4 : 16),
+                                  ),
+                                  border: mine && type != 'failed'
+                                      ? null
+                                      : Border.all(
+                                          color: type == 'failed'
+                                              ? scheme.error.withValues(alpha: 0.35)
+                                              : scheme.outlineVariant,
+                                        ),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      m['body']?.toString() ?? '',
+                                      style: theme.textTheme.bodyMedium?.copyWith(
+                                        color: type == 'failed'
+                                            ? scheme.onErrorContainer
+                                            : mine
+                                                ? scheme.onPrimary
+                                                : scheme.onSurface,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      _formatTime(m['dateMs']),
+                                      style: theme.textTheme.labelSmall?.copyWith(
+                                        color: type == 'failed'
+                                            ? scheme.onErrorContainer
+                                                .withValues(alpha: 0.75)
+                                            : mine
+                                                ? scheme.onPrimary
+                                                    .withValues(alpha: 0.75)
+                                                : scheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                              border: mine
-                                  ? null
-                                  : Border.all(color: scheme.outlineVariant),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(
-                                  m['body']?.toString() ?? '',
-                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                    color: mine
-                                        ? scheme.onPrimary
-                                        : scheme.onSurface,
-                                    height: 1.35,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  _formatTime(m['dateMs']),
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: mine
-                                        ? scheme.onPrimary.withValues(alpha: 0.75)
-                                        : scheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
+                              if (mine && status != 'inbox')
+                                MessageSendLabel(status: status),
+                            ],
                           ),
                         ),
                       );
@@ -257,6 +281,14 @@ class _ThreadScreenState extends State<ThreadScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (_lastSend != null) ...[
+                      SendStatusBanner(
+                        result: _lastSend!,
+                        onDismiss: () => setState(() => _lastSend = null),
+                        onRetry: _lastSend!.ok || _sending ? null : _send,
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     QuickTemplatesBar(
                       showHeader: false,
                       allowDelete: false,

@@ -7,6 +7,8 @@ import '../../bridge/call_bridge.dart';
 import '../../contacts/contact_display.dart';
 import '../../widgets/app_ui.dart';
 import 'quick_templates_bar.dart';
+import 'send_result.dart';
+import 'send_status_banner.dart';
 import 'sms_permission_help.dart';
 import 'thread_screen.dart';
 
@@ -25,6 +27,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
   int _subscriptionId = -1;
   bool _sending = false;
   bool _smsSend = false;
+  SendResult? _lastSend;
   StreamSubscription<Map<String, dynamic>>? _eventsSub;
 
   @override
@@ -97,9 +100,11 @@ class _ComposeScreenState extends State<ComposeScreen> {
         subscriptionId: _subscriptionId,
       );
       if (!mounted) return;
-      if (result['ok'] == true) {
-        final sub = result['subscriptionId'];
-        final auto = result['autoSelected'] == true;
+      final sendResult = SendResult.fromMap(result);
+      setState(() => _lastSend = sendResult);
+      if (sendResult.ok) {
+        final sub = sendResult.subscriptionId;
+        final auto = sendResult.autoSelected;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -123,10 +128,6 @@ class _ComposeScreenState extends State<ComposeScreen> {
           ),
         );
         await _refreshConversations();
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${result['error']}')),
-        );
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -221,6 +222,14 @@ class _ComposeScreenState extends State<ComposeScreen> {
           ),
         ),
         const SizedBox(height: 20),
+        if (_lastSend != null) ...[
+          SendStatusBanner(
+            result: _lastSend!,
+            onDismiss: () => setState(() => _lastSend = null),
+            onRetry: _lastSend!.ok || _sending ? null : _send,
+          ),
+          const SizedBox(height: 14),
+        ],
         FilledButton.icon(
           onPressed: _sending || !_smsSend ? null : _send,
           icon: _sending

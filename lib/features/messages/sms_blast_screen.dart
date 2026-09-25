@@ -8,6 +8,7 @@ import '../../bridge/call_bridge.dart';
 import '../../database/app_database.dart';
 import '../../database/db.dart';
 import '../../widgets/app_ui.dart';
+import 'blast_history_exporter.dart';
 import 'quick_templates_bar.dart';
 import 'sms_permission_help.dart';
 
@@ -451,6 +452,32 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
     }
   }
 
+  Future<void> _exportHistory() async {
+    if (_history.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _historyFilter == 'all'
+                ? 'No blast history to export yet'
+                : 'No blasts for ${_filterLabel()} to export',
+          ),
+        ),
+      );
+      return;
+    }
+    try {
+      await BlastHistoryExporter.share(
+        jobs: _history,
+        label: _filterLabel(),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Export failed: $e')),
+      );
+    }
+  }
+
   Future<void> _showHistoryDetail(BlastJob job) async {
     final rows = await appDatabase.recipientsFor(job.id);
     if (!mounted) return;
@@ -473,6 +500,26 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   isThreeLine: true,
+                  trailing: IconButton(
+                    tooltip: 'Export this blast',
+                    icon: const Icon(Icons.ios_share_rounded),
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      try {
+                        await BlastHistoryExporter.share(
+                          jobs: [job],
+                          label: _formatHistoryDate(job.createdAt)
+                              .split(' · ')
+                              .first,
+                        );
+                      } catch (e) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Export failed: $e')),
+                        );
+                      }
+                    },
+                  ),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -564,12 +611,26 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
         const SizedBox(height: 12),
         AppSectionHeader(
           'History',
-          trailing: Text(
-            _filterLabel(),
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: theme.colorScheme.primary,
-              fontWeight: FontWeight.w600,
-            ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _filterLabel(),
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: 'Export CSV',
+                onPressed: _historyLoading || _history.isEmpty
+                    ? null
+                    : _exportHistory,
+                icon: const Icon(Icons.ios_share_rounded),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
           ),
         ),
         SizedBox(

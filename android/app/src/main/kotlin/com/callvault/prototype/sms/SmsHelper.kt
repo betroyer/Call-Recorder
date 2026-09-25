@@ -461,6 +461,7 @@ class SmsHelper(private val activity: Activity) {
                     Telephony.Sms.BODY,
                     Telephony.Sms.DATE,
                     Telephony.Sms.TYPE,
+                    Telephony.Sms.STATUS,
                 ),
                 "${Telephony.Sms.ADDRESS} IN ($placeholders)",
                 variants.toTypedArray(),
@@ -473,17 +474,34 @@ class SmsHelper(private val activity: Activity) {
         cursor.use {
             var count = 0
             while (it.moveToNext() && count < limit) {
+                val type = it.getInt(4)
+                val deliveryStatus = it.getInt(5)
+                val typeLabel = when (type) {
+                    Telephony.Sms.MESSAGE_TYPE_INBOX -> "inbox"
+                    Telephony.Sms.MESSAGE_TYPE_SENT -> "sent"
+                    Telephony.Sms.MESSAGE_TYPE_FAILED -> "failed"
+                    Telephony.Sms.MESSAGE_TYPE_OUTBOX -> "outbox"
+                    Telephony.Sms.MESSAGE_TYPE_QUEUED -> "queued"
+                    else -> "other"
+                }
+                val statusLabel = when {
+                    type == Telephony.Sms.MESSAGE_TYPE_FAILED -> "failed"
+                    type == Telephony.Sms.MESSAGE_TYPE_OUTBOX ||
+                        type == Telephony.Sms.MESSAGE_TYPE_QUEUED -> "outbox"
+                    type == Telephony.Sms.MESSAGE_TYPE_SENT &&
+                        deliveryStatus == Telephony.Sms.STATUS_FAILED -> "failed"
+                    type == Telephony.Sms.MESSAGE_TYPE_SENT -> "sent"
+                    type == Telephony.Sms.MESSAGE_TYPE_INBOX -> "inbox"
+                    else -> typeLabel
+                }
                 items.add(
                     mapOf(
                         "id" to it.getLong(0),
                         "address" to (it.getString(1) ?: address),
                         "body" to (it.getString(2) ?: ""),
                         "dateMs" to it.getLong(3),
-                        "type" to when (it.getInt(4)) {
-                            Telephony.Sms.MESSAGE_TYPE_INBOX -> "inbox"
-                            Telephony.Sms.MESSAGE_TYPE_SENT -> "sent"
-                            else -> "other"
-                        },
+                        "type" to typeLabel,
+                        "status" to statusLabel,
                     ),
                 )
                 count++
