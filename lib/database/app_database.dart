@@ -97,6 +97,29 @@ class AppDatabase extends _$AppDatabase {
             ..limit(limit))
           .get();
 
+  /// [from] inclusive, [to] exclusive. Nulls mean no bound on that side.
+  Future<List<BlastJob>> blastsInRange({
+    DateTime? from,
+    DateTime? to,
+    int limit = 200,
+  }) {
+    final q = select(blastJobs)
+      ..orderBy([(t) => OrderingTerm.desc(t.createdAt)])
+      ..limit(limit);
+    if (from != null && to != null) {
+      q.where(
+        (t) =>
+            t.createdAt.isBiggerOrEqualValue(from) &
+            t.createdAt.isSmallerThanValue(to),
+      );
+    } else if (from != null) {
+      q.where((t) => t.createdAt.isBiggerOrEqualValue(from));
+    } else if (to != null) {
+      q.where((t) => t.createdAt.isSmallerThanValue(to));
+    }
+    return q.get();
+  }
+
   Future<List<BlastRecipient>> recipientsFor(String blastId) =>
       (select(blastRecipients)..where((t) => t.blastId.equals(blastId))).get();
 }
