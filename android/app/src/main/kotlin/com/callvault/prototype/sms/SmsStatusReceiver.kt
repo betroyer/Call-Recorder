@@ -114,8 +114,10 @@ object SmsSentWaiters {
             32 ->
                 "No default SMS app — set PYX Food Products as the default SMS app."
             124, 111, 105 ->
-                "Modem busy (code $resultCode)$ril. Wait a few seconds and retry. " +
-                    "Keep blasts slower; confirm Globe load."
+                "Modem busy (code $resultCode)$ril. Usually no Globe SMS load/promo, " +
+                    "or the radio needs a cool-down. Open the stock Messages app and send " +
+                    "the same number — if that also fails, buy/register a Globe SMS promo " +
+                    "(*143#), toggle Airplane mode 10s, then retry here."
             else ->
                 "Send failed (code $resultCode)$ril. Check Globe load, signal, " +
                     "battery Unrestricted, and PYX as default SMS."

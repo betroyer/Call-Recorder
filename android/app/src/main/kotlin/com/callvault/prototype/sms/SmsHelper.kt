@@ -623,11 +623,15 @@ class SmsHelper(private val activity: Activity) {
         }
 
         val err = lastFailure["error"]?.toString() ?: "Send failed on all SIMs"
-        val hint = if (tryOrder.size > 1) {
-            " Tried ${attempts.size} SIM(s). Put SMS load on one SIM, pick it under Send via, " +
-                "set PYX Food Products as default SMS, then retry."
-        } else {
-            " Put SMS load on the SIM, set PYX Food Products as default SMS, then retry."
+        val hint = when {
+            ((lastFailure["resultCode"] as? Number)?.toInt() == 124) ->
+                " Quick check: open stock Messages and text the same number. " +
+                    "If that fails too, this is Globe SMS load/promo — not the app. Dial *143#."
+            tryOrder.size > 1 ->
+                " Tried ${attempts.size} SIM(s). Put SMS load on one SIM, pick it under Send via, " +
+                    "set PYX Food Products as default SMS, then retry."
+            else ->
+                " Put SMS load on the SIM, set PYX Food Products as default SMS, then retry."
         }
         SmsEventHub.emit(
             mapOf(
@@ -648,46 +652,69 @@ class SmsHelper(private val activity: Activity) {
         body: String,
         subscriptionId: Int,
     ): Map<String, Any?> {
-        val addresses = addressSendVariants(normalized)
+        // Prefer 09… then +63… (Globe/Realme often returns 124 on +63 first try).
+        val addresses = addressSendVariants(normalized).take(2)
+        val resolvedSub = resolveConcreteSubscriptionId(subscriptionId)
+        val simSmsc = readSmscAddress(resolvedSub)
         var last: Map<String, Any?> = mapOf(
             "ok" to false,
             "status" to "failed",
             "error" to "Send failed",
             "address" to normalized,
         )
-        for (addr in addresses) {
-            val first = sendSmsOnSubscriptionOnce(addr, body, subscriptionId)
-            if (first["ok"] == true) {
-                return first + mapOf("address" to normalized, "sentAs" to addr)
+
+        // Code 124 = RESULT_RIL_SMS_SEND_FAIL_RETRY — modem asks for a cool-down + retry.
+        val waitsMs = longArrayOf(0L, 5_000L, 12_000L, 20_000L)
+        for ((attemptIdx, waitMs) in waitsMs.withIndex()) {
+            if (waitMs > 0) {
+                try {
+                    Thread.sleep(waitMs)
+                } catch (_: InterruptedException) {
+                }
             }
-            last = first
-            val code = (first["resultCode"] as? Number)?.toInt() ?: -1
-            val timedOut = first["timedOut"] == true
-            if (!timedOut && !SmsSentWaiters.isTransientModemError(code)) {
-                // Permanent failure for this address form — still try next format.
-                continue
+            // After two failures, also try explicit Globe SMSC (blank/wrong SMSC → 124).
+            val scList: List<String?> = when {
+                attemptIdx >= 2 && !simSmsc.isNullOrBlank() -> listOf(null, simSmsc, "+639170000130")
+                attemptIdx >= 2 -> listOf(null, "+639170000130")
+                else -> listOf(null)
             }
-            try {
-                Thread.sleep(if (timedOut) 500 else 900)
-            } catch (_: InterruptedException) {
+            for (addr in addresses) {
+                for (sc in scList) {
+                    val attempt = sendSmsOnSubscriptionOnce(addr, body, subscriptionId, sc)
+                    if (attempt["ok"] == true) {
+                        return attempt + mapOf(
+                            "address" to normalized,
+                            "sentAs" to addr,
+                            "scAddress" to sc,
+                            "retryAttempt" to attemptIdx,
+                        )
+                    }
+                    last = attempt
+                    val code = (attempt["resultCode"] as? Number)?.toInt() ?: -1
+                    if (code != 124 && code != 16 && code != 111 && code != 105 &&
+                        attempt["timedOut"] != true &&
+                        !SmsSentWaiters.isTransientModemError(code)
+                    ) {
+                        // Non-retryable for this combo — try next address/SMSC.
+                        continue
+                    }
+                }
             }
-            val second = sendSmsOnSubscriptionOnce(addr, body, subscriptionId)
-            if (second["ok"] == true) {
-                return second + mapOf("address" to normalized, "sentAs" to addr)
+            val lastCode = (last["resultCode"] as? Number)?.toInt() ?: -1
+            if (lastCode != 124 && lastCode != 16 && last["timedOut"] != true) {
+                break
             }
-            last = second
         }
         return last + mapOf("address" to normalized)
     }
 
-    /** Formats Realme/Globe often accept: +63…, 09…, 63… */
+    /** Prefer local 09… first — Globe/Realme often reject +63 with code 124. */
     private fun addressSendVariants(normalized: String): List<String> {
         val digits = normalized.filter { it.isDigit() }
         val out = linkedSetOf<String>()
-        if (normalized.isNotBlank()) out.add(normalized)
         if (digits.length == 12 && digits.startsWith("63")) {
-            out.add("+$digits")
             out.add("0${digits.substring(2)}")
+            out.add("+$digits")
             out.add(digits)
         } else if (digits.length == 11 && digits.startsWith("09")) {
             out.add(digits)
@@ -698,13 +725,34 @@ class SmsHelper(private val activity: Activity) {
             out.add("+63$digits")
             out.add("63$digits")
         }
+        if (normalized.isNotBlank()) out.add(normalized)
         return out.toList()
+    }
+
+    /** null = device default SMSC; also try known Globe PH centers if readable SMSC is empty. */
+    private fun readSmscAddress(subscriptionId: Int): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        return try {
+            val tm = activity.getSystemService(Context.TELEPHONY_SERVICE) as? android.telephony.TelephonyManager
+                ?: return null
+            val bound = if (subscriptionId >= 0) {
+                tm.createForSubscriptionId(subscriptionId)
+            } else {
+                tm
+            }
+            // getSmscAddress() is API 30+; some OEM SDKs hide the Kotlin property.
+            val method = bound.javaClass.getMethod("getSmscAddress")
+            (method.invoke(bound) as? String)?.trim()?.takeIf { it.isNotEmpty() }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun sendSmsOnSubscriptionOnce(
         destination: String,
         body: String,
         subscriptionId: Int,
+        scAddress: String? = null,
     ): Map<String, Any?> {
         return try {
             val resolvedSub = resolveConcreteSubscriptionId(subscriptionId)
@@ -740,7 +788,6 @@ class SmsHelper(private val activity: Activity) {
             val sentIntents = ArrayList<PendingIntent>(partCount)
             val piFlags = smsPendingIntentFlags()
             repeat(partCount) { index ->
-                // Explicit component — ColorOS often drops package-only implicit PIs.
                 val sentIntent = Intent(activity, SmsStatusReceiver::class.java).apply {
                     action = ACTION_SMS_SENT
                     putExtra("address", destination)
@@ -758,11 +805,10 @@ class SmsHelper(private val activity: Activity) {
             }
 
             try {
-                // Null deliveryIntent: delivery reports break send on some Realme builds.
                 if (partCount > 1 && parts != null) {
-                    sms.sendMultipartTextMessage(destination, null, parts, sentIntents, null)
+                    sms.sendMultipartTextMessage(destination, scAddress, parts, sentIntents, null)
                 } else {
-                    sms.sendTextMessage(destination, null, body, sentIntents[0], null)
+                    sms.sendTextMessage(destination, scAddress, body, sentIntents[0], null)
                 }
 
                 val timeoutMs = if (isAggressiveOem()) 35_000L else 45_000L
@@ -778,6 +824,7 @@ class SmsHelper(private val activity: Activity) {
                         "errorCode" to outcome.errorCode,
                         "timedOut" to outcome.timedOut,
                         "subscriptionId" to resolvedSub,
+                        "scAddress" to scAddress,
                     )
                 }
 
@@ -798,6 +845,7 @@ class SmsHelper(private val activity: Activity) {
                     "address" to destination,
                     "subscriptionId" to resolvedSub,
                     "error" to null,
+                    "scAddress" to scAddress,
                 )
             } finally {
                 try {
@@ -941,7 +989,9 @@ class SmsHelper(private val activity: Activity) {
             } catch (_: Exception) {
                 1
             }
+            val resultCode = (result["resultCode"] as? Number)?.toInt() ?: -1
             val base = when {
+                resultCode == 124 || resultCode == 16 -> 12_000L
                 consecutiveFails >= 5 -> 8000L
                 consecutiveFails >= 3 -> 4500L
                 consecutiveFails >= 1 -> 3000L
@@ -954,10 +1004,9 @@ class SmsHelper(private val activity: Activity) {
                 Thread.sleep(delayMs)
             } catch (_: InterruptedException) {
             }
-            if (consecutiveFails >= 5 && consecutiveFails % 5 == 0) {
-                // Cool-down so carrier/modem can recover from burst rejects.
+            if (resultCode == 124 || resultCode == 16 || (consecutiveFails >= 3 && consecutiveFails % 3 == 0)) {
                 try {
-                    Thread.sleep(if (oemSlow) 15_000L else 10_000L)
+                    Thread.sleep(if (oemSlow) 20_000L else 12_000L)
                 } catch (_: InterruptedException) {
                 }
             }
