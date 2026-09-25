@@ -7,6 +7,7 @@ import '../../branding.dart';
 import '../../bridge/call_bridge.dart';
 import '../../database/app_database.dart';
 import '../../database/db.dart';
+import '../../widgets/app_ui.dart';
 import 'sms_permission_help.dart';
 
 /// Multi-recipient SMS blast with progress, contacts, templates, history, schedule.
@@ -432,12 +433,14 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
         if (!_isDefaultSms)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: OutlinedButton(
-              onPressed: () async {
+            child: AppNoticeBanner(
+              icon: Icons.sms_outlined,
+              message: 'Set as default SMS app for better inbox and sent sync.',
+              actionLabel: 'Set',
+              onAction: () async {
                 await CallBridge.requestDefaultSmsRole();
                 await _bootstrap();
               },
-              child: const Text('Set as default SMS app (better inbox/sent sync)'),
             ),
           ),
         Expanded(
@@ -571,25 +574,21 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
           ),
         ],
         const SizedBox(height: 12),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: SizedBox(
-            width: 140,
-            height: 44,
-            child: FilledButton(
-              onPressed: !_smsSend || _sending ? null : _send,
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF2E7D32),
-                shape: const RoundedRectangleBorder(),
-              ),
-              child: _sending
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Text('SEND'),
-            ),
+        FilledButton.icon(
+          onPressed: !_smsSend || _sending ? null : _send,
+          icon: _sending
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.campaign_rounded),
+          label: Text(_sending ? 'Sending…' : 'Send blast'),
+          style: FilledButton.styleFrom(
+            minimumSize: const Size.fromHeight(52),
           ),
         ),
         if (_lastResults.isNotEmpty) ...[

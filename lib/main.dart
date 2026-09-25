@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'app_shell.dart';
 import 'branding.dart';
+import 'theme/app_theme.dart';
+import 'app_shell.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,10 +16,8 @@ class CallVaultPrototypeApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: AppBrand.appName,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1B4D3E)),
-        useMaterial3: true,
-      ),
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.light(),
       home: const AppShell(),
     );
   }

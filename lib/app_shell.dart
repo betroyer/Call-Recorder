@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../bridge/call_bridge.dart';
-import '../features/messages/inbox_screen.dart';
-import '../features/messages/compose_screen.dart';
-import '../features/messages/sms_blast_screen.dart';
-import '../prototype/prototype_screen.dart';
+import 'branding.dart';
+import 'bridge/call_bridge.dart';
+import 'features/messages/inbox_screen.dart';
+import 'features/messages/compose_screen.dart';
+import 'features/messages/sms_blast_screen.dart';
+import 'prototype/prototype_screen.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -26,6 +27,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final pages = <Widget>[
       const PrototypeScreen(embedded: true),
       const InboxScreen(),
@@ -35,7 +37,37 @@ class _AppShellState extends State<AppShell> {
 
     return Scaffold(
       appBar: AppBar(
+        titleSpacing: 12,
+        leadingWidth: 52,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 12),
+          child: CircleAvatar(
+            backgroundColor: theme.colorScheme.primary,
+            foregroundColor: theme.colorScheme.onPrimary,
+            child: Text(
+              'P',
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: theme.colorScheme.onPrimary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
         title: Text(_titles[_index]),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Center(
+              child: Text(
+                AppBrand.companyName,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
       body: IndexedStack(
         index: _index,
@@ -46,23 +78,23 @@ class _AppShellState extends State<AppShell> {
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.mic_none),
-            selectedIcon: Icon(Icons.mic),
+            icon: Icon(Icons.mic_none_rounded),
+            selectedIcon: Icon(Icons.mic_rounded),
             label: 'Record',
           ),
           NavigationDestination(
             icon: Icon(Icons.inbox_outlined),
-            selectedIcon: Icon(Icons.inbox),
+            selectedIcon: Icon(Icons.inbox_rounded),
             label: 'Inbox',
           ),
           NavigationDestination(
-            icon: Icon(Icons.chat_bubble_outline),
-            selectedIcon: Icon(Icons.chat_bubble),
+            icon: Icon(Icons.chat_bubble_outline_rounded),
+            selectedIcon: Icon(Icons.chat_bubble_rounded),
             label: 'Message',
           ),
           NavigationDestination(
             icon: Icon(Icons.campaign_outlined),
-            selectedIcon: Icon(Icons.campaign),
+            selectedIcon: Icon(Icons.campaign_rounded),
             label: 'Blast',
           ),
         ],

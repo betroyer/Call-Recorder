@@ -3,11 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../bridge/call_bridge.dart';
+import '../../widgets/app_ui.dart';
 import 'sms_permission_help.dart';
 import 'thread_screen.dart';
 
-/// Conversation inbox: shows both your sent messages and customer replies,
-/// kept in sync with the Message tab.
+/// Conversation inbox: shows both your sent messages and customer replies.
 class InboxScreen extends StatefulWidget {
   const InboxScreen({super.key});
 
@@ -61,7 +61,6 @@ class _InboxScreenState extends State<InboxScreen> {
         }
         return;
       }
-      // Conversations include sent + received so Message and Inbox stay in sync.
       final list = await CallBridge.listSmsConversations();
       if (mounted) {
         setState(() {
@@ -140,24 +139,41 @@ class _InboxScreenState extends State<InboxScreen> {
   }
 
   Widget _defaultSmsBanner() {
-    return ListTile(
-      tileColor: Theme.of(context).colorScheme.secondaryContainer,
-      leading: const Icon(Icons.sms_outlined),
-      title: const Text(
-        'For reliable incoming customer SMS, set PYX Food Products as the default SMS app.',
-      ),
-      trailing: TextButton(
-        onPressed: () async {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: AppNoticeBanner(
+        icon: Icons.sms_outlined,
+        message:
+            'For reliable incoming customer SMS, set PYX Food Products as the default SMS app.',
+        actionLabel: 'Set',
+        onAction: () async {
           await CallBridge.requestDefaultSmsRole();
           await _load(silent: true);
         },
-        child: const Text('Set'),
       ),
     );
   }
 
+  Future<void> _openThread(Map<String, dynamic> m) async {
+    final address = m['address']?.toString() ?? '';
+    final isRead = m['read'] == true;
+    if (!isRead) {
+      await _setThreadRead(m, true, silent: true);
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ThreadScreen(address: address),
+      ),
+    );
+    await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -170,7 +186,12 @@ class _InboxScreenState extends State<InboxScreen> {
       );
     }
     if (_error != null) {
-      return Center(child: Text(_error!));
+      return AppEmptyState(
+        icon: Icons.error_outline_rounded,
+        title: 'Couldn’t load inbox',
+        message: _error,
+        action: FilledButton(onPressed: _load, child: const Text('Retry')),
+      );
     }
     if (_items.isEmpty) {
       return RefreshIndicator(
@@ -178,26 +199,26 @@ class _InboxScreenState extends State<InboxScreen> {
         child: ListView(
           children: [
             if (!_defaultSms) _defaultSmsBanner(),
-            const SizedBox(height: 120),
-            const Center(child: Text('No conversations yet.')),
-            const SizedBox(height: 8),
-            const Center(
-              child: Text(
-                'Send from Message, or wait for a customer reply — both appear here.',
-                textAlign: TextAlign.center,
-              ),
+            AppEmptyState(
+              icon: Icons.forum_outlined,
+              title: 'No conversations yet',
+              message:
+                  'Send from Message, or wait for a customer reply — both appear here.',
             ),
           ],
         ),
       );
     }
 
-    final theme = Theme.of(context);
     return RefreshIndicator(
       onRefresh: () => _load(),
       child: ListView.separated(
+        padding: const EdgeInsets.only(bottom: 24),
         itemCount: _items.length + (_defaultSms ? 0 : 1),
-        separatorBuilder: (_, _) => const Divider(height: 1),
+        separatorBuilder: (_, index) {
+          if (!_defaultSms && index == 0) return const SizedBox.shrink();
+          return Divider(height: 1, indent: 72, color: scheme.outlineVariant);
+        },
         itemBuilder: (context, index) {
           if (!_defaultSms && index == 0) {
             return _defaultSmsBanner();
@@ -205,97 +226,141 @@ class _InboxScreenState extends State<InboxScreen> {
           final m = _items[_defaultSms ? index : index - 1];
           final address = m['address']?.toString() ?? '';
           final isRead = m['read'] == true;
-          final titleStyle = isRead
-              ? theme.textTheme.titleMedium
-              : theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700);
-          final bodyStyle = isRead
-              ? theme.textTheme.bodyMedium
-              : theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600);
+          final digits = address.replaceAll(RegExp(r'\D'), '');
+          final avatarLetter = digits.isNotEmpty
+              ? digits[digits.length - 1]
+              : (address.isNotEmpty ? address[0] : '?');
 
-          return ListTile(
-            leading: CircleAvatar(
-              backgroundColor: isRead
-                  ? theme.colorScheme.surfaceContainerHighest
-                  : theme.colorScheme.primaryContainer,
-              child: Text(address.isNotEmpty ? address[0] : '?'),
-            ),
-            title: Text(address, style: titleStyle),
-            subtitle: Text(
-              _preview(m),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: bodyStyle,
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (!isRead)
-                  Container(
-                    width: 8,
-                    height: 8,
-                    margin: const EdgeInsets.only(right: 8),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primary,
-                      shape: BoxShape.circle,
+          return Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => _openThread(m),
+              onLongPress: () async {
+                final choice = await showModalBottomSheet<String>(
+                  context: context,
+                  showDragHandle: true,
+                  builder: (ctx) => SafeArea(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ListTile(
+                          leading: const Icon(Icons.mark_email_read_outlined),
+                          title: const Text('Mark as read'),
+                          onTap: () => Navigator.pop(ctx, 'read'),
+                        ),
+                        ListTile(
+                          leading: const Icon(Icons.mark_email_unread_outlined),
+                          title: const Text('Mark as unread'),
+                          onTap: () => Navigator.pop(ctx, 'unread'),
+                        ),
+                      ],
                     ),
                   ),
-                Text(
-                  _formatTime(m['dateMs']),
-                  style: theme.textTheme.bodySmall,
-                ),
-                PopupMenuButton<String>(
-                  onSelected: (value) {
-                    if (value == 'read') _setThreadRead(m, true);
-                    if (value == 'unread') _setThreadRead(m, false);
-                  },
-                  itemBuilder: (context) => [
-                    if (!isRead)
-                      const PopupMenuItem(value: 'read', child: Text('Mark as read')),
-                    if (isRead)
-                      const PopupMenuItem(
-                        value: 'unread',
-                        child: Text('Mark as unread'),
+                );
+                if (choice == 'read') await _setThreadRead(m, true);
+                if (choice == 'unread') await _setThreadRead(m, false);
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CircleAvatar(
+                      radius: 22,
+                      backgroundColor: isRead
+                          ? scheme.surfaceContainerHighest
+                          : scheme.primaryContainer,
+                      foregroundColor: isRead
+                          ? scheme.onSurfaceVariant
+                          : scheme.onPrimaryContainer,
+                      child: Text(
+                        avatarLetter,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  address,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    fontWeight:
+                                        isRead ? FontWeight.w500 : FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                _formatTime(m['dateMs']),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                              PopupMenuButton<String>(
+                                padding: EdgeInsets.zero,
+                                onSelected: (value) {
+                                  if (value == 'read') _setThreadRead(m, true);
+                                  if (value == 'unread') _setThreadRead(m, false);
+                                },
+                                itemBuilder: (context) => [
+                                  if (!isRead)
+                                    const PopupMenuItem(
+                                      value: 'read',
+                                      child: Text('Mark as read'),
+                                    ),
+                                  if (isRead)
+                                    const PopupMenuItem(
+                                      value: 'unread',
+                                      child: Text('Mark as unread'),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  _preview(m),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: isRead
+                                        ? scheme.onSurfaceVariant
+                                        : scheme.onSurface,
+                                    fontWeight:
+                                        isRead ? FontWeight.w400 : FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              if (!isRead)
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  margin: const EdgeInsets.only(left: 8),
+                                  decoration: BoxDecoration(
+                                    color: scheme.primary,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
-              ],
+              ),
             ),
-            onTap: () async {
-              if (!isRead) {
-                await _setThreadRead(m, true, silent: true);
-              }
-              if (!context.mounted) return;
-              await Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => ThreadScreen(address: address),
-                ),
-              );
-              await _load();
-            },
-            onLongPress: () async {
-              final choice = await showModalBottomSheet<String>(
-                context: context,
-                builder: (ctx) => SafeArea(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ListTile(
-                        leading: const Icon(Icons.mark_email_read_outlined),
-                        title: const Text('Mark as read'),
-                        onTap: () => Navigator.pop(ctx, 'read'),
-                      ),
-                      ListTile(
-                        leading: const Icon(Icons.mark_email_unread_outlined),
-                        title: const Text('Mark as unread'),
-                        onTap: () => Navigator.pop(ctx, 'unread'),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-              if (choice == 'read') await _setThreadRead(m, true);
-              if (choice == 'unread') await _setThreadRead(m, false);
-            },
           );
         },
       ),

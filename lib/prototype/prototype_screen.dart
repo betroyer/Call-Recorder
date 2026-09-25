@@ -4,6 +4,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 
 import '../bridge/call_bridge.dart';
+import '../widgets/app_ui.dart';
 import 'playback_modal.dart';
 
 class PrototypeScreen extends StatefulWidget {
@@ -282,7 +283,9 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
   @override
   void dispose() {
     _eventsSub?.cancel();
-    CallBridge.dispose();
+    if (!widget.embedded) {
+      CallBridge.dispose();
+    }
     _player.dispose();
     super.dispose();
   }
@@ -290,237 +293,254 @@ class _PrototypeScreenState extends State<PrototypeScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
-      appBar: widget.embedded
-          ? null
-          : AppBar(
-              title: const Text('PYX Food Products'),
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+      children: [
+        AppNoticeBanner(
+          tone: AppNoticeTone.warning,
+          icon: Icons.hearing_disabled_outlined,
+          message:
+              'Two-way call audio is not guaranteed. Android restricts ordinary apps from capturing voice-call audio — verify by listening.',
+        ),
+        const SizedBox(height: 12),
+        Text(
+          _bridgeInfo ?? 'Connecting to native…',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const AppSectionHeader('Permissions'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            StatusPill(label: 'Mic', ok: _permissions['microphone'] == true),
+            StatusPill(label: 'Phone', ok: _permissions['phone'] == true),
+            StatusPill(label: 'SMS send', ok: _permissions['smsSend'] == true),
+            StatusPill(label: 'SMS read', ok: _permissions['smsRead'] == true),
+            StatusPill(
+              label: 'Notifications',
+              ok: _permissions['notifications'] == true,
             ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            color: theme.colorScheme.errorContainer.withValues(alpha: 0.35),
-            child: const Padding(
-              padding: EdgeInsets.all(12),
-              child: Text(
-                'Two-way call audio is not guaranteed; verify by listening. '
-                'Android restricts ordinary apps from capturing voice-call audio.',
-              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton(
+              onPressed: _busy ? null : _requestPermissions,
+              child: const Text('Request permissions'),
+            ),
+            OutlinedButton(
+              onPressed: () => CallBridge.openAppSettings(),
+              child: const Text('Open Settings'),
+            ),
+            OutlinedButton(
+              onPressed: _refreshPermissions,
+              child: const Text('Refresh'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const AppSectionHeader('Shizuku (elevated recording)'),
+        Text(
+          'Install Shizuku, enable Wireless Debugging, start Shizuku, then grant this app. '
+          'Tries VOICE_DOWNLINK+UPLINK mix (skips VOICE_CALL which mutes many phones).',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            height: 1.4,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            StatusPill(label: 'Installed', ok: _shizuku['installed'] == true),
+            StatusPill(label: 'Running', ok: _shizuku['running'] == true),
+            StatusPill(label: 'Permission', ok: _shizuku['permission'] == true),
+          ],
+        ),
+        if (_shizuku['uidHint'] != null) ...[
+          const SizedBox(height: 6),
+          Text('Ping: ${_shizuku['uidHint']}', style: theme.textTheme.bodySmall),
+        ],
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Use Shizuku recorder'),
+          subtitle: Text(
+            _useShizuku
+                ? 'Elevated shell capture (.wav)'
+                : 'Normal in-app MediaRecorder (.m4a)',
+          ),
+          value: _useShizuku,
+          onChanged: (v) => _setUseShizuku(v),
+        ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton(
+              onPressed: () async {
+                await CallBridge.requestShizukuPermission();
+                await _refreshShizuku();
+              },
+              child: const Text('Grant Shizuku'),
+            ),
+            OutlinedButton(
+              onPressed: () async {
+                final ok = await CallBridge.openShizukuApp();
+                if (!ok && mounted) {
+                  setState(() => _lastError = 'Shizuku app not installed');
+                }
+              },
+              child: const Text('Open Shizuku'),
+            ),
+            OutlinedButton(
+              onPressed: _refreshShizuku,
+              child: const Text('Refresh status'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const AppSectionHeader('Call monitor'),
+        Text(
+          'Call state: $_callState · Monitoring: ${_monitoring ? 'on' : 'off'}',
+          style: theme.textTheme.bodyMedium,
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Auto-record when call active'),
+          subtitle: const Text('Starts on connected/offhook, stops on idle'),
+          value: _autoRecord,
+          onChanged: (v) => setState(() => _autoRecord = v),
+        ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton(
+              onPressed: _busy || _monitoring ? null : _startMonitor,
+              child: const Text('Start monitor'),
+            ),
+            OutlinedButton(
+              onPressed: _busy || !_monitoring ? null : _stopMonitor,
+              child: const Text('Stop monitor'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const AppSectionHeader('Recording'),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Mode: ${_useShizuku ? 'Shizuku (elevated)' : 'Normal (MIC)'}'),
+                const SizedBox(height: 4),
+                Text('State: $_recordingState'),
+                const SizedBox(height: 4),
+                Text(
+                  'Source: ${_recordingSource ?? '— (not set yet — start a recording)'}',
+                  style: theme.textTheme.titleSmall,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Last path: ${_lastPath ?? '—'}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                if (_lastError != null && _lastError!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text(
+                      'Error: $_lastError',
+                      style: TextStyle(color: theme.colorScheme.error),
+                    ),
+                  ),
+              ],
             ),
           ),
-          const SizedBox(height: 12),
-          Text(_bridgeInfo ?? 'Connecting to native…',
-              style: theme.textTheme.bodySmall),
-          const SizedBox(height: 16),
-          _sectionTitle('Permissions'),
-          _permRow('Microphone', _permissions['microphone'] == true),
-          _permRow('Phone state', _permissions['phone'] == true),
-          _permRow('SMS send', _permissions['smsSend'] == true),
-          _permRow('SMS read', _permissions['smsRead'] == true),
-          _permRow('Notifications', _permissions['notifications'] == true),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              FilledButton(
-                onPressed: _busy ? null : _requestPermissions,
-                child: const Text('Request permissions'),
-              ),
-              OutlinedButton(
-                onPressed: () => CallBridge.openAppSettings(),
-                child: const Text('Open Settings'),
-              ),
-              OutlinedButton(
-                onPressed: _refreshPermissions,
-                child: const Text('Refresh'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          _sectionTitle('Shizuku (elevated recording)'),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton(
+              onPressed: _busy || _recordingState == 'recording'
+                  ? null
+                  : () => _startRecording(manual: true),
+              child: const Text('Start recording'),
+            ),
+            FilledButton.tonal(
+              onPressed: _busy || _recordingState != 'recording'
+                  ? null
+                  : () => _stopRecording(manual: true),
+              child: const Text('Stop recording'),
+            ),
+            OutlinedButton(
+              onPressed: () => _playPath(_lastPath),
+              child: const Text('Play last file'),
+            ),
+            OutlinedButton(
+              onPressed: _refreshRecordings,
+              child: const Text('Refresh files'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const AppSectionHeader('Listen checklist'),
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Your voice recorded'),
+          value: _heardSelf,
+          onChanged: (v) => setState(() => _heardSelf = v ?? false),
+        ),
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Other person’s voice recorded'),
+          value: _heardRemote,
+          onChanged: (v) => setState(() => _heardRemote = v ?? false),
+        ),
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Both sides recorded'),
+          value: _heardBoth,
+          onChanged: (v) => setState(() => _heardBoth = v ?? false),
+        ),
+        const AppSectionHeader('Saved recordings'),
+        if (_recordings.isEmpty)
           Text(
-            'Install Shizuku, enable Wireless Debugging, start Shizuku, then grant this app. '
-            'Tries VOICE_DOWNLINK+UPLINK mix (skips VOICE_CALL which mutes many phones).',
-            style: theme.textTheme.bodySmall,
-          ),
-          const SizedBox(height: 8),
-          Text('Installed: ${_yesNo(_shizuku['installed'])}'),
-          Text('Running: ${_yesNo(_shizuku['running'])}'),
-          Text('Permission: ${_yesNo(_shizuku['permission'])}'),
-          if (_shizuku['uidHint'] != null) Text('Ping: ${_shizuku['uidHint']}'),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Use Shizuku recorder'),
-            subtitle: Text(
-              _useShizuku
-                  ? 'Elevated shell capture (.wav)'
-                  : 'Normal in-app MediaRecorder (.m4a)',
+            'No recordings yet.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
             ),
-            value: _useShizuku,
-            onChanged: (v) => _setUseShizuku(v),
-          ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              FilledButton(
-                onPressed: () async {
-                  await CallBridge.requestShizukuPermission();
-                  await _refreshShizuku();
-                },
-                child: const Text('Grant Shizuku'),
-              ),
-              OutlinedButton(
-                onPressed: () async {
-                  final ok = await CallBridge.openShizukuApp();
-                  if (!ok && mounted) {
-                    setState(() => _lastError = 'Shizuku app not installed');
-                  }
-                },
-                child: const Text('Open Shizuku'),
-              ),
-              OutlinedButton(
-                onPressed: _refreshShizuku,
-                child: const Text('Refresh status'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          _sectionTitle('Call monitor'),
-          Text('Call state: $_callState'),
-          Text('Monitoring: ${_monitoring ? 'on' : 'off'}'),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Auto-record when call active'),
-            subtitle: const Text('Starts on connected/offhook, stops on idle'),
-            value: _autoRecord,
-            onChanged: (v) => setState(() => _autoRecord = v),
-          ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              FilledButton(
-                onPressed: _busy || _monitoring ? null : _startMonitor,
-                child: const Text('Start monitor'),
-              ),
-              OutlinedButton(
-                onPressed: _busy || !_monitoring ? null : _stopMonitor,
-                child: const Text('Stop monitor'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          _sectionTitle('Recording'),
-          Text('Mode: ${_useShizuku ? 'Shizuku (elevated)' : 'Normal (MIC)'}'),
-          Text('State: $_recordingState'),
-          Text(
-            'Source: ${_recordingSource ?? '— (not set yet — start a recording)'}',
-            style: theme.textTheme.titleSmall,
-          ),
-          Text('Last path: ${_lastPath ?? '—'}'),
-          if (_lastError != null && _lastError!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                'Error: $_lastError',
-                style: TextStyle(color: theme.colorScheme.error),
-              ),
-            ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              FilledButton(
-                onPressed: _busy || _recordingState == 'recording'
-                    ? null
-                    : () => _startRecording(manual: true),
-                child: const Text('Start recording'),
-              ),
-              FilledButton.tonal(
-                onPressed: _busy || _recordingState != 'recording'
-                    ? null
-                    : () => _stopRecording(manual: true),
-                child: const Text('Stop recording'),
-              ),
-              OutlinedButton(
-                onPressed: () => _playPath(_lastPath),
-                child: const Text('Play last file'),
-              ),
-              OutlinedButton(
-                onPressed: _refreshRecordings,
-                child: const Text('Refresh files'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          _sectionTitle('Listen checklist (manual)'),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Your voice recorded'),
-            value: _heardSelf,
-            onChanged: (v) => setState(() => _heardSelf = v ?? false),
-          ),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Other person’s voice recorded'),
-            value: _heardRemote,
-            onChanged: (v) => setState(() => _heardRemote = v ?? false),
-          ),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Both sides recorded'),
-            value: _heardBoth,
-            onChanged: (v) => setState(() => _heardBoth = v ?? false),
-          ),
-          const SizedBox(height: 12),
-          _sectionTitle('Saved recordings'),
-          if (_recordings.isEmpty)
-            const Text('No recordings yet.')
-          else
-            ..._recordings.map((r) {
-              final path = r['path']?.toString() ?? '';
-              final name = r['name']?.toString() ?? path;
-              final bytes = r['bytes'];
-              return ListTile(
-                contentPadding: EdgeInsets.zero,
+          )
+        else
+          ..._recordings.map((r) {
+            final path = r['path']?.toString() ?? '';
+            final name = r['name']?.toString() ?? path;
+            final bytes = r['bytes'];
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
                 title: Text(name),
-                subtitle: Text('$bytes bytes\n$path'),
-                isThreeLine: true,
-                trailing: IconButton(
-                  icon: const Icon(Icons.play_arrow),
+                subtitle: Text('$bytes bytes'),
+                trailing: IconButton.filledTonal(
+                  icon: const Icon(Icons.play_arrow_rounded),
                   onPressed: () => _playPath(path),
                 ),
-              );
-            }),
-        ],
-      ),
-    );
-  }
-
-  Widget _sectionTitle(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(text, style: Theme.of(context).textTheme.titleMedium),
-    );
-  }
-
-  Widget _permRow(String label, bool granted) {
-    return Row(
-      children: [
-        Icon(
-          granted ? Icons.check_circle : Icons.cancel,
-          color: granted ? Colors.green : Colors.orange,
-          size: 18,
-        ),
-        const SizedBox(width: 8),
-        Text('$label: ${granted ? 'granted' : 'denied'}'),
+              ),
+            );
+          }),
       ],
     );
   }
 
-  String _yesNo(Object? value) => value == true ? 'yes' : 'no';
 }

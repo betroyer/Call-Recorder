@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../branding.dart';
 import '../../bridge/call_bridge.dart';
+import '../../widgets/app_ui.dart';
 import 'sms_permission_help.dart';
 import 'thread_screen.dart';
 
@@ -51,7 +52,6 @@ class _ComposeScreenState extends State<ComposeScreen> {
     try {
       _sims = await CallBridge.listSims();
       _conversations = await CallBridge.listSmsConversations();
-      // Keep Auto (-1) so native code tries the SIM that last worked / has load.
       if (_sims.every((s) => (s['id'] as num?)?.toInt() != _subscriptionId)) {
         _subscriptionId = -1;
       }
@@ -73,7 +73,6 @@ class _ComposeScreenState extends State<ComposeScreen> {
   }
 
   ({int chars, int pages}) _smsMeta(String text) {
-    // Rough GSM-7 vs Unicode page estimate.
     final isGsm = text.codeUnits.every((c) => c <= 127);
     final limit = isGsm ? 160 : 70;
     final multi = isGsm ? 153 : 67;
@@ -129,9 +128,10 @@ class _ComposeScreenState extends State<ComposeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final meta = _smsMeta(_body.text);
     final simItems = _sims.isEmpty
-        ? const [DropdownMenuItem(value: -1, child: Text('Default SIM'))]
+        ? const [DropdownMenuItem(value: -1, child: Text('Auto — try SIM with load'))]
         : _sims
             .map(
               (s) => DropdownMenuItem(
@@ -142,42 +142,59 @@ class _ComposeScreenState extends State<ComposeScreen> {
             .toList();
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
       children: [
-        if (!_smsSend)
+        if (!_smsSend) ...[
           SmsPermissionHelp(onRequest: _request),
-        if (!_smsSend) const SizedBox(height: 12),
+          const SizedBox(height: 16),
+        ],
+        AppNoticeBanner(
+          icon: Icons.storefront_outlined,
+          tone: AppNoticeTone.success,
+          message:
+              'Messages are sent as “${AppBrand.companyName}: …” so customers see your business name in the text.',
+        ),
+        const SizedBox(height: 16),
         TextField(
           controller: _to,
           keyboardType: TextInputType.phone,
-                      decoration: const InputDecoration(
+          textInputAction: TextInputAction.next,
+          decoration: const InputDecoration(
             labelText: 'To',
             hintText: '0917… or +63917…',
-            helperText: 'Spaces are OK — number is cleaned before send',
-            border: OutlineInputBorder(),
+            helperText: 'Spaces are cleaned before send',
+            prefixIcon: Icon(Icons.person_outline_rounded),
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
         TextField(
           controller: _body,
-          minLines: 4,
+          minLines: 5,
           maxLines: 8,
-          decoration: InputDecoration(
+          textInputAction: TextInputAction.newline,
+          decoration: const InputDecoration(
             labelText: 'Message',
-            border: const OutlineInputBorder(),
             alignLabelWithHint: true,
-            helperText: 'Sent as “${AppBrand.companyName}: …” so customers see your business name',
+            prefixIcon: Padding(
+              padding: EdgeInsets.only(bottom: 64),
+              child: Icon(Icons.edit_outlined),
+            ),
           ),
         ),
         const SizedBox(height: 8),
-        Text('${meta.chars} character  ${meta.pages} SMS page'),
-        const SizedBox(height: 8),
+        Text(
+          '${meta.chars} characters · ${meta.pages} SMS page${meta.pages == 1 ? '' : 's'}',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 14),
         InputDecorator(
           decoration: const InputDecoration(
-            labelText: 'Send via SIM (pick the one with load)',
-            border: OutlineInputBorder(),
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            labelText: 'Send via SIM',
             helperText: 'Auto tries the last working SIM, then the other slot',
+            prefixIcon: Icon(Icons.sim_card_outlined),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<int>(
@@ -190,48 +207,66 @@ class _ComposeScreenState extends State<ComposeScreen> {
             ),
           ),
         ),
-        const SizedBox(height: 16),
-        FilledButton(
+        const SizedBox(height: 20),
+        FilledButton.icon(
           onPressed: _sending || !_smsSend ? null : _send,
-          style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFF2E7D32),
-            minimumSize: const Size.fromHeight(48),
-          ),
-          child: _sending
+          icon: _sending
               ? const SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
                 )
-              : const Text('SEND'),
+              : const Icon(Icons.send_rounded),
+          label: Text(_sending ? 'Sending…' : 'Send message'),
+          style: FilledButton.styleFrom(
+            minimumSize: const Size.fromHeight(52),
+          ),
         ),
-        const SizedBox(height: 24),
-        Text('Conversations (same as Inbox)', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8),
+        const SizedBox(height: 28),
+        const AppSectionHeader('Recent conversations'),
         if (_conversations.isEmpty)
-          const Text('No conversations yet. Send a message — it will show in Inbox too.')
+          Text(
+            'No conversations yet. Send a message — it will show in Inbox too.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          )
         else
           ..._conversations.map((c) {
             final address = c['address']?.toString() ?? '';
             final type = c['type']?.toString();
             final body = c['body']?.toString() ?? '';
             final preview = type == 'sent' ? 'You: $body' : body;
-            return ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(address),
-              subtitle: Text(
-                preview,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              onTap: () async {
-                await Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => ThreadScreen(address: address),
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                  child: Icon(
+                    Icons.chat_bubble_outline_rounded,
+                    size: 18,
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
-                );
-                await _refreshConversations();
-              },
+                ),
+                title: Text(address),
+                subtitle: Text(
+                  preview,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ThreadScreen(address: address),
+                    ),
+                  );
+                  await _refreshConversations();
+                },
+              ),
             );
           }),
       ],

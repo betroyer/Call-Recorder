@@ -17,6 +17,7 @@ class ThreadScreen extends StatefulWidget {
 class _ThreadScreenState extends State<ThreadScreen> {
   List<Map<String, dynamic>> _messages = const [];
   final _reply = TextEditingController();
+  final _scroll = ScrollController();
   bool _sending = false;
   StreamSubscription<Map<String, dynamic>>? _eventsSub;
 
@@ -39,6 +40,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
   void dispose() {
     _eventsSub?.cancel();
     _reply.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -47,7 +49,14 @@ class _ThreadScreenState extends State<ThreadScreen> {
     if (markRead) {
       await CallBridge.setSmsThreadRead(address: widget.address, read: true);
     }
-    if (mounted) setState(() => _messages = list);
+    if (mounted) {
+      setState(() => _messages = list);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scroll.hasClients) {
+          _scroll.jumpTo(_scroll.position.maxScrollExtent);
+        }
+      });
+    }
   }
 
   Future<void> _setThreadRead(bool read) async {
@@ -100,9 +109,20 @@ class _ThreadScreenState extends State<ThreadScreen> {
     }
   }
 
+  String _formatTime(dynamic ms) {
+    final n = ms is int ? ms : int.tryParse('$ms') ?? 0;
+    if (n <= 0) return '';
+    final dt = DateTime.fromMillisecondsSinceEpoch(n);
+    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
     return Scaffold(
+      backgroundColor: scheme.surface,
       appBar: AppBar(
         title: Text(widget.address),
         actions: [
@@ -121,67 +141,116 @@ class _ThreadScreenState extends State<ThreadScreen> {
       body: Column(
         children: [
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: _messages.length,
-              itemBuilder: (context, index) {
-                final m = _messages[index];
-                final mine = m['type']?.toString() == 'sent';
-                return Align(
-                  alignment:
-                      mine ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    constraints: BoxConstraints(
-                      maxWidth: MediaQuery.sizeOf(context).width * 0.75,
-                    ),
-                    decoration: BoxDecoration(
-                      color: mine
-                          ? Theme.of(context).colorScheme.primaryContainer
-                          : Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(m['body']?.toString() ?? ''),
-                  ),
-                );
-              },
-            ),
-          ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _reply,
-                      decoration: const InputDecoration(
-                        hintText: 'Message',
-                        border: OutlineInputBorder(),
-                        isDense: true,
+            child: _messages.isEmpty
+                ? Center(
+                    child: Text(
+                      'No messages in this thread yet.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
                       ),
-                      minLines: 1,
-                      maxLines: 4,
                     ),
+                  )
+                : ListView.builder(
+                    controller: _scroll,
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                    itemCount: _messages.length,
+                    itemBuilder: (context, index) {
+                      final m = _messages[index];
+                      final mine = m['type']?.toString() == 'sent';
+                      return Align(
+                        alignment: mine
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: MediaQuery.sizeOf(context).width * 0.78,
+                          ),
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(vertical: 4),
+                            padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+                            decoration: BoxDecoration(
+                              color: mine
+                                  ? scheme.primary
+                                  : Colors.white,
+                              borderRadius: BorderRadius.only(
+                                topLeft: const Radius.circular(16),
+                                topRight: const Radius.circular(16),
+                                bottomLeft: Radius.circular(mine ? 16 : 4),
+                                bottomRight: Radius.circular(mine ? 4 : 16),
+                              ),
+                              border: mine
+                                  ? null
+                                  : Border.all(color: scheme.outlineVariant),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  m['body']?.toString() ?? '',
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: mine
+                                        ? scheme.onPrimary
+                                        : scheme.onSurface,
+                                    height: 1.35,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _formatTime(m['dateMs']),
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: mine
+                                        ? scheme.onPrimary.withValues(alpha: 0.75)
+                                        : scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(
-                    onPressed: _sending ? null : _send,
-                    icon: _sending
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.send),
-                  ),
-                ],
+          ),
+          Material(
+            color: Colors.white,
+            elevation: 6,
+            shadowColor: Colors.black26,
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _reply,
+                        decoration: const InputDecoration(
+                          hintText: 'Type a reply…',
+                          isDense: true,
+                        ),
+                        minLines: 1,
+                        maxLines: 4,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _send(),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    IconButton.filled(
+                      onPressed: _sending ? null : _send,
+                      style: IconButton.styleFrom(
+                        minimumSize: const Size(48, 48),
+                      ),
+                      icon: _sending
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.send_rounded),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
