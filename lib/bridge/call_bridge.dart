@@ -254,6 +254,11 @@ class CallBridge {
     return (result as Map)['ok'] == true;
   }
 
+  static Future<bool> openAppBatterySettings() async {
+    final result = await _methods.invokeMethod<dynamic>('openAppBatterySettings');
+    return (result as Map)['ok'] == true;
+  }
+
   static Future<bool> openPreferredSmsSimSettings() async {
     final result =
         await _methods.invokeMethod<dynamic>('openPreferredSmsSimSettings');

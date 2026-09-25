@@ -206,6 +206,8 @@ class CallVaultBridge(
             "deviceSmsHints" -> result.success(smsHelper.deviceSmsHints())
             "requestIgnoreBatteryOptimizations" ->
                 result.success(mapOf("ok" to smsHelper.requestIgnoreBatteryOptimizations()))
+            "openAppBatterySettings" ->
+                result.success(mapOf("ok" to smsHelper.openAppBatterySettings()))
             "openPreferredSmsSimSettings" ->
                 result.success(mapOf("ok" to smsHelper.openPreferredSmsSimSettings()))
             "openMmsComposer" -> {

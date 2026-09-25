@@ -58,7 +58,12 @@ class _ComposeScreenState extends State<ComposeScreen> {
     try {
       _sims = await CallBridge.listSims();
       _conversations = await CallBridge.listSmsConversations();
-      if (_sims.every((s) => (s['id'] as num?)?.toInt() != _subscriptionId)) {
+      final hints = await CallBridge.deviceSmsHints();
+      final onlyId = (hints['onlySubscriptionId'] as num?)?.toInt() ?? -1;
+      final singleSim = hints['singleSim'] != false;
+      if (singleSim && onlyId >= 0) {
+        _subscriptionId = onlyId;
+      } else if (_sims.every((s) => (s['id'] as num?)?.toInt() != _subscriptionId)) {
         _subscriptionId = -1;
       }
     } catch (_) {}

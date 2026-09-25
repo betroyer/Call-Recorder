@@ -36,8 +36,10 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
   bool _smsSend = false;
   bool _isDefaultSms = false;
   bool _aggressiveOem = false;
+  bool _singleSim = true;
   bool _ignoringBattery = true;
   String _deviceLabel = '';
+  String _carrier = '';
   List<String> _oemTips = const [];
 
   int _progressIndex = 0;
@@ -102,7 +104,9 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
       _sims = await CallBridge.listSims();
       final hints = await CallBridge.deviceSmsHints();
       _aggressiveOem = hints['aggressiveOem'] == true;
+      _singleSim = hints['singleSim'] != false;
       _ignoringBattery = hints['ignoringBatteryOptimizations'] == true;
+      _carrier = hints['carrier']?.toString() ?? '';
       final brand = hints['brand']?.toString() ?? '';
       final model = hints['model']?.toString() ?? '';
       _deviceLabel = [brand, model].where((s) => s.trim().isNotEmpty).join(' ');
@@ -111,6 +115,13 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
               .where((s) => s.isNotEmpty)
               .toList() ??
           const [];
+      // Single SIM: bind that subscription instead of leaving Auto unbound.
+      final onlyId = (hints['onlySubscriptionId'] as num?)?.toInt() ?? -1;
+      if (_singleSim && onlyId >= 0) {
+        _subscriptionId = onlyId;
+      } else if (_sims.every((s) => (s['id'] as num?)?.toInt() != _subscriptionId)) {
+        _subscriptionId = -1;
+      }
       await _loadHistory();
     } catch (_) {}
     if (mounted) setState(() {});
@@ -1022,9 +1033,13 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
             child: AppNoticeBanner(
               icon: Icons.sim_card_outlined,
               tone: AppNoticeTone.info,
-              message: _sims.any((s) => s['lastSuccessful'] == true)
-                  ? 'Using your SIM card. Prefer Auto or the SIM marked “has load / last OK” under Send via.'
-                  : 'Using your SIM card. Send one test from Message first, then pick that SIM (or Auto) here.',
+              message: _singleSim
+                  ? '1 SIM detected'
+                      '${_carrier.isEmpty ? '' : ' · $_carrier'}'
+                      '. Send one short Message first, then use Blast.'
+                  : (_sims.any((s) => s['lastSuccessful'] == true)
+                      ? 'Using your SIM card. Prefer Auto or the SIM marked “has load / last OK” under Send via.'
+                      : 'Using your SIM card. Send one test from Message first, then pick that SIM (or Auto) here.'),
             ),
           ),
         if (_aggressiveOem)
@@ -1041,14 +1056,20 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      'Realme / ColorOS SMS setup'
-                      '${_deviceLabel.isEmpty ? '' : ' · $_deviceLabel'}',
+                      _singleSim
+                          ? 'Realme 1-SIM setup'
+                              '${_deviceLabel.isEmpty ? '' : ' · $_deviceLabel'}'
+                          : 'Realme / ColorOS SMS setup'
+                              '${_deviceLabel.isEmpty ? '' : ' · $_deviceLabel'}',
                       style: theme.textTheme.titleSmall,
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'This phone family often blocks blast SMS unless Preferred SIM '
-                      'for SMS is fixed (not Ask every time) and battery is Unrestricted.',
+                      _singleSim
+                          ? 'With one Globe SIM you can ignore Preferred SIM / Ask every time. '
+                              'On Realme, set battery to Unrestricted and keep PYX as default SMS.'
+                          : 'This phone family often blocks blast SMS unless Preferred SIM '
+                              'for SMS is fixed (not Ask every time) and battery is Unrestricted.',
                       style: theme.textTheme.bodySmall,
                     ),
                     if (_oemTips.isNotEmpty) ...[
@@ -1065,19 +1086,24 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        FilledButton.tonal(
+                        FilledButton(
                           onPressed: () async {
-                            await CallBridge.openPreferredSmsSimSettings();
+                            await CallBridge.requestIgnoreBatteryOptimizations();
+                            await CallBridge.openAppBatterySettings();
+                            await _bootstrap();
                           },
-                          child: const Text('Open SIM settings'),
+                          child: Text(
+                            _ignoringBattery
+                                ? 'Open battery settings'
+                                : 'Allow unrestricted battery',
+                          ),
                         ),
-                        if (!_ignoringBattery)
+                        if (!_singleSim)
                           FilledButton.tonal(
                             onPressed: () async {
-                              await CallBridge.requestIgnoreBatteryOptimizations();
-                              await _bootstrap();
+                              await CallBridge.openPreferredSmsSimSettings();
                             },
-                            child: const Text('Allow unrestricted battery'),
+                            child: const Text('Open SIM settings'),
                           ),
                       ],
                     ),

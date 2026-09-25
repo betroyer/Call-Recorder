@@ -667,20 +667,9 @@ class SmsHelper(private val activity: Activity) {
     ): Map<String, Any?> {
         return try {
             val resolvedSub = resolveConcreteSubscriptionId(subscriptionId)
-            if (resolvedSub < 0 && isAggressiveOem()) {
-                return mapOf(
-                    "ok" to false,
-                    "status" to "failed",
-                    "error" to
-                        "No SMS SIM selected. On Realme/Oppo set Preferred SIM for SMS " +
-                            "(not Ask every time), then pick that SIM under Send via.",
-                    "address" to normalized,
-                    "resultCode" to SmsManager.RESULT_ERROR_GENERIC_FAILURE,
-                    "noDefault" to true,
-                    "subscriptionId" to subscriptionId,
-                )
-            }
-            val sms = smsManagerFor(resolvedSub)
+            // Even if subscription id is unknown, still attempt send via getDefault()
+            // on single-SIM phones (Realme C100i + Globe).
+            val sms = smsManagerFor(if (resolvedSub >= 0) resolvedSub else subscriptionId)
             val code = requestCode.incrementAndGet()
             val parts = sms.divideMessage(body)
             val partCount = if (parts != null && parts.size > 1) parts.size else 1
@@ -1122,6 +1111,9 @@ class SmsHelper(private val activity: Activity) {
      */
     private fun resolveConcreteSubscriptionId(preferredId: Int): Int {
         if (preferredId >= 0) return preferredId
+        // Single-SIM (e.g. Realme C100i + Globe only): always bind that subscription.
+        val active = activeSubscriptionIds()
+        if (active.size == 1) return active[0]
         val order = subscriptionTryOrder(-1)
         return order.firstOrNull { it >= 0 } ?: defaultSmsSubscriptionId()
     }
@@ -1143,6 +1135,27 @@ class SmsHelper(private val activity: Activity) {
         val brand = Build.BRAND.orEmpty()
         val model = Build.MODEL.orEmpty()
         val aggressive = isAggressiveOem()
+        val active = activeSubscriptionIds()
+        val simCount = active.size
+        val singleSim = simCount <= 1
+        val onlySubId = active.firstOrNull() ?: -1
+        val carrier = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1 &&
+                ContextCompat.checkSelfPermission(activity, Manifest.permission.READ_PHONE_STATE) ==
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                val sm = activity.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as? SubscriptionManager
+                sm?.activeSubscriptionInfoList
+                    ?.firstOrNull()
+                    ?.carrierName
+                    ?.toString()
+                    .orEmpty()
+            } else {
+                ""
+            }
+        } catch (_: Exception) {
+            ""
+        }
         val ignoringBattery = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 val pm = activity.getSystemService(PowerManager::class.java)
@@ -1155,16 +1168,31 @@ class SmsHelper(private val activity: Activity) {
         }
         val tips = mutableListOf<String>()
         if (aggressive) {
-            tips.add("Set Preferred SIM for SMS to the SIM with load (not Ask every time).")
-            tips.add("Settings → Battery → PYX Food Products → Unrestricted / Allow background.")
-            tips.add("Keep the screen on while Blast runs.")
-            tips.add("Under Send via, pick the SIM with load (not only Auto).")
+            if (singleSim) {
+                tips.add(
+                    "1 SIM detected${if (carrier.isNotBlank()) " ($carrier)" else ""} — " +
+                        "Preferred SIM / Ask every time does not apply.",
+                )
+                tips.add("Settings → Battery → PYX Food Products → Unrestricted (most important on Realme).")
+                tips.add("Keep PYX Food Products as the default SMS app.")
+                tips.add("Confirm this SIM has SMS load, then send one short Message first.")
+                tips.add("Keep the screen on while Blast runs.")
+            } else {
+                tips.add("Set Preferred SIM for SMS to the SIM with load (not Ask every time).")
+                tips.add("Settings → Battery → PYX Food Products → Unrestricted / Allow background.")
+                tips.add("Keep the screen on while Blast runs.")
+                tips.add("Under Send via, pick the SIM with load (not only Auto).")
+            }
         }
         return mapOf(
             "manufacturer" to manufacturer,
             "brand" to brand,
             "model" to model,
             "aggressiveOem" to aggressive,
+            "simCount" to simCount,
+            "singleSim" to singleSim,
+            "onlySubscriptionId" to onlySubId,
+            "carrier" to carrier,
             "ignoringBatteryOptimizations" to ignoringBattery,
             "tips" to tips,
         )
@@ -1188,6 +1216,37 @@ class SmsHelper(private val activity: Activity) {
                 false
             }
         }
+    }
+
+    fun openAppBatterySettings(): Boolean {
+        val packageUri = Uri.parse("package:${activity.packageName}")
+        val candidates = listOf(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri),
+            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+            Intent().setComponent(
+                ComponentName(
+                    "com.coloros.oppoguardelf",
+                    "com.coloros.powermanager.fuelgaue.PowerUsageModelActivity",
+                ),
+            ),
+            Intent().setComponent(
+                ComponentName(
+                    "com.coloros.safecenter",
+                    "com.coloros.safecenter.permission.startup.StartupAppListActivity",
+                ),
+            ),
+        )
+        for (intent in candidates) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (intent.resolveActivity(activity.packageManager) != null) {
+                    activity.startActivity(intent)
+                    return true
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return requestIgnoreBatteryOptimizations()
     }
 
     fun openPreferredSmsSimSettings(): Boolean {
