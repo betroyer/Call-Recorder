@@ -171,11 +171,21 @@ class SmsHelper(private val activity: Activity) {
     }
 
     fun isDefaultSmsApp(): Boolean {
-        return try {
-            Telephony.Sms.getDefaultSmsPackage(activity) == activity.packageName
+        try {
+            if (Telephony.Sms.getDefaultSmsPackage(activity) == activity.packageName) {
+                return true
+            }
         } catch (_: Exception) {
-            false
         }
+        // Some OEMs lag getDefaultSmsPackage after the role grant; RoleManager is authoritative on Q+.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val rm = activity.getSystemService(RoleManager::class.java)
+                if (rm != null && rm.isRoleHeld(RoleManager.ROLE_SMS)) return true
+            } catch (_: Exception) {
+            }
+        }
+        return false
     }
 
     fun requestDefaultSmsRole(): Boolean {

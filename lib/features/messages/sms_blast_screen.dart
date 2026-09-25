@@ -22,7 +22,7 @@ class SmsBlastScreen extends StatefulWidget {
   State<SmsBlastScreen> createState() => _SmsBlastScreenState();
 }
 
-class _SmsBlastScreenState extends State<SmsBlastScreen> {
+class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObserver {
   final _numbers = TextEditingController();
   final _message = TextEditingController();
   List<Map<String, dynamic>> _sims = const [];
@@ -53,6 +53,7 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _bootstrap();
     _message.addListener(() => setState(() {}));
     _numbers.addListener(() => setState(() {}));
@@ -74,7 +75,15 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _bootstrap();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _eventsSub?.cancel();
     _numbers.dispose();
     _message.dispose();
@@ -449,33 +458,84 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
     final body = _message.text.trim();
     if (recipients.isEmpty || body.isEmpty || _sending) return;
 
+    // Re-check default SMS every send (OEMs can lag after the system dialog).
+    try {
+      final perms = await CallBridge.checkPermissions();
+      _isDefaultSms = perms['defaultSms'] == true;
+      if (mounted) setState(() {});
+    } catch (_) {}
+
+    if (!mounted) return;
     if (!_isDefaultSms) {
-      final go = await showDialog<bool>(
+      final choice = await showDialog<String>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Set default SMS app'),
+          title: const Text('Default SMS app'),
           content: const Text(
-            'Mass SMS often fails with modem errors (16/124) when PYX is not the '
-            'default SMS app.\n\nSet PYX Food Products as default SMS, then try again.',
+            'If you already selected PYX Food Products as default SMS, tap '
+            '“Refresh & send”.\n\n'
+            'If not, tap “Set default”, press OK on the Android note, then send again.\n\n'
+            'You can also “Send anyway” (may still hit modem errors 16/124).',
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'cancel'),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'anyway'),
+              child: const Text('Send anyway'),
+            ),
             FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
+              onPressed: () => Navigator.pop(ctx, 'set'),
               child: const Text('Set default'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, 'refresh'),
+              child: const Text('Refresh & send'),
             ),
           ],
         ),
       );
-      if (go == true) {
+      if (choice == null || choice == 'cancel') return;
+      if (choice == 'set') {
         await CallBridge.requestDefaultSmsRole();
+        await Future<void>.delayed(const Duration(milliseconds: 1200));
         await _bootstrap();
+        if (!_isDefaultSms) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'After Android shows OK, come back and tap Send blast again '
+                '(or Refresh & send).',
+              ),
+            ),
+          );
+          return;
+        }
+      } else if (choice == 'refresh') {
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+        await _bootstrap();
+        if (!_isDefaultSms) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Android still reports another default SMS app. '
+                'Open system settings → Default SMS app → PYX Food Products → OK.',
+              ),
+            ),
+          );
+          return;
+        }
       }
-      return;
+      // 'anyway' falls through and sends
     }
 
     final pages = _smsMeta(AppBrand.brandMessage(body)).pages;
     if (pages >= 4) {
+      if (!mounted) return;
       final go = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -497,7 +557,6 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
     if (!await _confirmRateLimit(pasted.length, recipients.length)) return;
 
     final branded = AppBrand.brandMessage(body);
-    // Auto (-1): native picks last-OK SIM and fails over. Do NOT alternate SIMs.
     const allSims = false;
 
     if (_scheduledAt != null && _scheduledAt!.isAfter(DateTime.now().add(const Duration(seconds: 5)))) {
