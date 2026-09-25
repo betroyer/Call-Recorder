@@ -18,6 +18,8 @@ class InboxScreen extends StatefulWidget {
 
 class _InboxScreenState extends State<InboxScreen> {
   List<Map<String, dynamic>> _items = const [];
+  final _search = TextEditingController();
+  String _query = '';
   bool _loading = true;
   String? _error;
   bool _smsRead = false;
@@ -28,6 +30,11 @@ class _InboxScreenState extends State<InboxScreen> {
   void initState() {
     super.initState();
     CallBridge.listen();
+    _search.addListener(() {
+      final next = _search.text;
+      if (next == _query) return;
+      setState(() => _query = next);
+    });
     _eventsSub = CallBridge.events.listen((e) {
       if (e['type'] == 'onSmsChanged') {
         _load(silent: true);
@@ -39,7 +46,27 @@ class _InboxScreenState extends State<InboxScreen> {
   @override
   void dispose() {
     _eventsSub?.cancel();
+    _search.dispose();
     super.dispose();
+  }
+
+  List<Map<String, dynamic>> get _filtered {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return _items;
+    final qDigits = q.replaceAll(RegExp(r'\D'), '');
+    return _items.where((m) {
+      final name = m['contactName']?.toString().toLowerCase() ?? '';
+      final address = m['address']?.toString().toLowerCase() ?? '';
+      final body = m['body']?.toString().toLowerCase() ?? '';
+      if (name.contains(q) || address.contains(q) || body.contains(q)) {
+        return true;
+      }
+      if (qDigits.isNotEmpty) {
+        final addressDigits = address.replaceAll(RegExp(r'\D'), '');
+        if (addressDigits.contains(qDigits)) return true;
+      }
+      return false;
+    }).toList();
   }
 
   Future<void> _load({bool silent = false}) async {
@@ -139,9 +166,49 @@ class _InboxScreenState extends State<InboxScreen> {
     return body;
   }
 
+  Widget _searchBar(ThemeData theme, ColorScheme scheme) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: TextField(
+        controller: _search,
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          hintText: 'Search name, number, or message',
+          prefixIcon: const Icon(Icons.search_rounded),
+          suffixIcon: _query.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: 'Clear',
+                  onPressed: () {
+                    _search.clear();
+                    setState(() => _query = '');
+                  },
+                  icon: const Icon(Icons.close_rounded),
+                ),
+          filled: true,
+          fillColor: scheme.surfaceContainerLowest,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: scheme.outlineVariant),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: scheme.outlineVariant),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: scheme.primary, width: 1.5),
+          ),
+        ),
+        style: theme.textTheme.bodyMedium,
+      ),
+    );
+  }
+
   Widget _defaultSmsBanner() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       child: AppNoticeBanner(
         icon: Icons.sms_outlined,
         message:
@@ -172,6 +239,166 @@ class _InboxScreenState extends State<InboxScreen> {
       ),
     );
     await _load();
+  }
+
+  Widget _conversationTile(
+    BuildContext context,
+    Map<String, dynamic> m,
+    ThemeData theme,
+    ColorScheme scheme,
+  ) {
+    final address = m['address']?.toString() ?? '';
+    final contactName = m['contactName']?.toString().trim();
+    final title = ContactDisplay.title(m);
+    final numberSubtitle = ContactDisplay.subtitleNumber(m);
+    final isRead = m['read'] == true;
+    final avatarLetter = ContactDisplay.avatarLetter(
+      name: contactName,
+      address: address,
+    );
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _openThread(m),
+        onLongPress: () async {
+          final choice = await showModalBottomSheet<String>(
+            context: context,
+            showDragHandle: true,
+            builder: (ctx) => SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.mark_email_read_outlined),
+                    title: const Text('Mark as read'),
+                    onTap: () => Navigator.pop(ctx, 'read'),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.mark_email_unread_outlined),
+                    title: const Text('Mark as unread'),
+                    onTap: () => Navigator.pop(ctx, 'unread'),
+                  ),
+                ],
+              ),
+            ),
+          );
+          if (choice == 'read') await _setThreadRead(m, true);
+          if (choice == 'unread') await _setThreadRead(m, false);
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                radius: 22,
+                backgroundColor: isRead
+                    ? scheme.surfaceContainerHighest
+                    : scheme.primaryContainer,
+                foregroundColor: isRead
+                    ? scheme.onSurfaceVariant
+                    : scheme.onPrimaryContainer,
+                child: Text(
+                  avatarLetter,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight:
+                                  isRead ? FontWeight.w500 : FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          _formatTime(m['dateMs']),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        PopupMenuButton<String>(
+                          padding: EdgeInsets.zero,
+                          onSelected: (value) {
+                            if (value == 'read') _setThreadRead(m, true);
+                            if (value == 'unread') _setThreadRead(m, false);
+                          },
+                          itemBuilder: (context) => [
+                            if (!isRead)
+                              const PopupMenuItem(
+                                value: 'read',
+                                child: Text('Mark as read'),
+                              ),
+                            if (isRead)
+                              const PopupMenuItem(
+                                value: 'unread',
+                                child: Text('Mark as unread'),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    if (numberSubtitle != null) ...[
+                      const SizedBox(height: 1),
+                      Text(
+                        numberSubtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _preview(m),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: isRead
+                                  ? scheme.onSurfaceVariant
+                                  : scheme.onSurface,
+                              fontWeight:
+                                  isRead ? FontWeight.w400 : FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        if (!isRead)
+                          Container(
+                            width: 8,
+                            height: 8,
+                            margin: const EdgeInsets.only(left: 8),
+                            decoration: BoxDecoration(
+                              color: scheme.primary,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -215,174 +442,64 @@ class _InboxScreenState extends State<InboxScreen> {
       );
     }
 
-    return RefreshIndicator(
-      onRefresh: () => _load(),
-      child: ListView.separated(
-        padding: const EdgeInsets.only(bottom: 24),
-        itemCount: _items.length + (_defaultSms ? 0 : 1),
-        separatorBuilder: (_, index) {
-          if (!_defaultSms && index == 0) return const SizedBox.shrink();
-          return Divider(height: 1, indent: 72, color: scheme.outlineVariant);
-        },
-        itemBuilder: (context, index) {
-          if (!_defaultSms && index == 0) {
-            return _defaultSmsBanner();
-          }
-          final m = _items[_defaultSms ? index : index - 1];
-          final address = m['address']?.toString() ?? '';
-          final contactName = m['contactName']?.toString().trim();
-          final title = ContactDisplay.title(m);
-          final numberSubtitle = ContactDisplay.subtitleNumber(m);
-          final isRead = m['read'] == true;
-          final avatarLetter = ContactDisplay.avatarLetter(
-            name: contactName,
-            address: address,
-          );
+    final visible = _filtered;
+    final searching = _query.trim().isNotEmpty;
+    final showBanner = !_defaultSms;
 
-          return Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () => _openThread(m),
-              onLongPress: () async {
-                final choice = await showModalBottomSheet<String>(
-                  context: context,
-                  showDragHandle: true,
-                  builder: (ctx) => SafeArea(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ListTile(
-                          leading: const Icon(Icons.mark_email_read_outlined),
-                          title: const Text('Mark as read'),
-                          onTap: () => Navigator.pop(ctx, 'read'),
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.mark_email_unread_outlined),
-                          title: const Text('Mark as unread'),
-                          onTap: () => Navigator.pop(ctx, 'unread'),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-                if (choice == 'read') await _setThreadRead(m, true);
-                if (choice == 'unread') await _setThreadRead(m, false);
-              },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    CircleAvatar(
-                      radius: 22,
-                      backgroundColor: isRead
-                          ? scheme.surfaceContainerHighest
-                          : scheme.primaryContainer,
-                      foregroundColor: isRead
-                          ? scheme.onSurfaceVariant
-                          : scheme.onPrimaryContainer,
-                      child: Text(
-                        avatarLetter,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.titleSmall?.copyWith(
-                                    fontWeight:
-                                        isRead ? FontWeight.w500 : FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                _formatTime(m['dateMs']),
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: scheme.onSurfaceVariant,
-                                ),
-                              ),
-                              PopupMenuButton<String>(
-                                padding: EdgeInsets.zero,
-                                onSelected: (value) {
-                                  if (value == 'read') _setThreadRead(m, true);
-                                  if (value == 'unread') _setThreadRead(m, false);
+    return Column(
+      children: [
+        _searchBar(theme, scheme),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: () => _load(),
+            child: visible.isEmpty
+                ? ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      if (showBanner) _defaultSmsBanner(),
+                      AppEmptyState(
+                        icon: Icons.search_off_rounded,
+                        title: 'No matches',
+                        message: searching
+                            ? 'Nothing matched “${_query.trim()}”. Try a name, number, or word from the last message.'
+                            : null,
+                        action: searching
+                            ? TextButton(
+                                onPressed: () {
+                                  _search.clear();
+                                  setState(() => _query = '');
                                 },
-                                itemBuilder: (context) => [
-                                  if (!isRead)
-                                    const PopupMenuItem(
-                                      value: 'read',
-                                      child: Text('Mark as read'),
-                                    ),
-                                  if (isRead)
-                                    const PopupMenuItem(
-                                      value: 'unread',
-                                      child: Text('Mark as unread'),
-                                    ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          if (numberSubtitle != null) ...[
-                            const SizedBox(height: 1),
-                            Text(
-                              numberSubtitle,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  _preview(m),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                    color: isRead
-                                        ? scheme.onSurfaceVariant
-                                        : scheme.onSurface,
-                                    fontWeight:
-                                        isRead ? FontWeight.w400 : FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                              if (!isRead)
-                                Container(
-                                  width: 8,
-                                  height: 8,
-                                  margin: const EdgeInsets.only(left: 8),
-                                  decoration: BoxDecoration(
-                                    color: scheme.primary,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ],
+                                child: const Text('Clear search'),
+                              )
+                            : null,
                       ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      ),
+                    ],
+                  )
+                : ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.only(bottom: 24),
+                    itemCount: visible.length + (showBanner ? 1 : 0),
+                    separatorBuilder: (_, index) {
+                      if (showBanner && index == 0) {
+                        return const SizedBox.shrink();
+                      }
+                      return Divider(
+                        height: 1,
+                        indent: 72,
+                        color: scheme.outlineVariant,
+                      );
+                    },
+                    itemBuilder: (context, index) {
+                      if (showBanner && index == 0) {
+                        return _defaultSmsBanner();
+                      }
+                      final m = visible[showBanner ? index - 1 : index];
+                      return _conversationTile(context, m, theme, scheme);
+                    },
+                  ),
+          ),
+        ),
+      ],
     );
   }
 }
