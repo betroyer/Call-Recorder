@@ -10,6 +10,7 @@ import '../../database/db.dart';
 import '../../widgets/app_ui.dart';
 import 'blast_history_exporter.dart';
 import 'quick_templates_bar.dart';
+import 'slash_quick_reply.dart';
 import 'sms_permission_help.dart';
 
 /// Multi-recipient SMS blast with progress, contacts, templates, history, schedule.
@@ -790,11 +791,13 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> {
           maxLines: 10,
           textAlignVertical: TextAlignVertical.top,
           decoration: const InputDecoration(
-            hintText: 'SMS message',
+            hintText: 'SMS message — type / for quick replies',
             border: OutlineInputBorder(),
             alignLabelWithHint: true,
           ),
         ),
+        const SizedBox(height: 8),
+        SlashQuickReplyPanel(controller: _message),
         const SizedBox(height: 8),
         Text(
           '${meta.chars} character · ${meta.pages} SMS page · $count recipient(s)',

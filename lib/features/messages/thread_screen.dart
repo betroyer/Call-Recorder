@@ -7,6 +7,7 @@ import '../../bridge/call_bridge.dart';
 import 'quick_templates_bar.dart';
 import 'send_result.dart';
 import 'send_status_banner.dart';
+import 'slash_quick_reply.dart';
 
 class ThreadScreen extends StatefulWidget {
   const ThreadScreen({
@@ -294,6 +295,11 @@ class _ThreadScreenState extends State<ThreadScreen> {
                       allowDelete: false,
                       onSelect: (body) => setState(() => _reply.text = body),
                     ),
+                    SlashQuickReplyPanel(
+                      controller: _reply,
+                      maxHeight: 240,
+                    ),
+                    const SizedBox(height: 4),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
@@ -301,7 +307,7 @@ class _ThreadScreenState extends State<ThreadScreen> {
                           child: TextField(
                             controller: _reply,
                             decoration: const InputDecoration(
-                              hintText: 'Type a reply…',
+                              hintText: 'Type a reply… or / for templates',
                               isDense: true,
                             ),
                             minLines: 1,

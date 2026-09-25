@@ -9,6 +9,7 @@ import '../../widgets/app_ui.dart';
 import 'quick_templates_bar.dart';
 import 'send_result.dart';
 import 'send_status_banner.dart';
+import 'slash_quick_reply.dart';
 import 'sms_permission_help.dart';
 import 'thread_screen.dart';
 
@@ -182,6 +183,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
           textInputAction: TextInputAction.newline,
           decoration: const InputDecoration(
             labelText: 'Message',
+            hintText: 'Type / for quick replies…',
             alignLabelWithHint: true,
             prefixIcon: Padding(
               padding: EdgeInsets.only(bottom: 64),
@@ -189,6 +191,8 @@ class _ComposeScreenState extends State<ComposeScreen> {
             ),
           ),
         ),
+        const SizedBox(height: 8),
+        SlashQuickReplyPanel(controller: _body),
         const SizedBox(height: 8),
         QuickTemplatesBar(
           allowSave: true,
