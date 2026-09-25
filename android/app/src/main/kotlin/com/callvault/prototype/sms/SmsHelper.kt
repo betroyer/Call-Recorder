@@ -5,14 +5,19 @@ import android.app.Activity
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.app.role.RoleManager
+import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.ContactsContract
+import android.provider.Settings
 import android.provider.Telephony
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
@@ -661,15 +666,60 @@ class SmsHelper(private val activity: Activity) {
         subscriptionId: Int,
     ): Map<String, Any?> {
         return try {
-            val sms = smsManagerFor(subscriptionId)
+            val resolvedSub = resolveConcreteSubscriptionId(subscriptionId)
+            if (resolvedSub < 0 && isAggressiveOem()) {
+                return mapOf(
+                    "ok" to false,
+                    "status" to "failed",
+                    "error" to
+                        "No SMS SIM selected. On Realme/Oppo set Preferred SIM for SMS " +
+                            "(not Ask every time), then pick that SIM under Send via.",
+                    "address" to normalized,
+                    "resultCode" to SmsManager.RESULT_ERROR_GENERIC_FAILURE,
+                    "noDefault" to true,
+                    "subscriptionId" to subscriptionId,
+                )
+            }
+            val sms = smsManagerFor(resolvedSub)
             val code = requestCode.incrementAndGet()
             val parts = sms.divideMessage(body)
             val partCount = if (parts != null && parts.size > 1) parts.size else 1
             SmsSentWaiters.armSent(code, partCount)
             SmsSentWaiters.armDelivered(code)
 
+            // Dynamic receiver: ColorOS sometimes delays/drops exported=false manifest delivery.
+            val liveReceiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    val action = intent?.action ?: return
+                    val req = intent.getIntExtra(SmsStatusReceiver.EXTRA_REQUEST_CODE, -1)
+                    if (req != code) return
+                    val noDefault = intent.getBooleanExtra("noDefault", false)
+                    val errorCode = intent.getIntExtra("errorCode", -1)
+                    when (action) {
+                        ACTION_SMS_SENT ->
+                            SmsSentWaiters.completeSent(req, resultCode, noDefault, errorCode)
+                        ACTION_SMS_DELIVERED ->
+                            SmsSentWaiters.completeDelivered(req, resultCode)
+                    }
+                }
+            }
+            val filter = IntentFilter().apply {
+                addAction(ACTION_SMS_SENT)
+                addAction(ACTION_SMS_DELIVERED)
+            }
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    activity.registerReceiver(liveReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                } else {
+                    @Suppress("UnspecifiedRegisterReceiverFlag")
+                    activity.registerReceiver(liveReceiver, filter)
+                }
+            } catch (_: Exception) {
+            }
+
             val sentIntents = ArrayList<PendingIntent>(partCount)
             val delIntents = ArrayList<PendingIntent>(partCount)
+            val piFlags = smsPendingIntentFlags()
             repeat(partCount) { index ->
                 val sentIntent = Intent(ACTION_SMS_SENT).apply {
                     setPackage(activity.packageName)
@@ -688,7 +738,7 @@ class SmsHelper(private val activity: Activity) {
                         activity,
                         code * 10 + index,
                         sentIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                        piFlags,
                     ),
                 )
                 delIntents.add(
@@ -696,47 +746,56 @@ class SmsHelper(private val activity: Activity) {
                         activity,
                         code * 10 + index + 500_000,
                         delIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                        piFlags,
                     ),
                 )
             }
 
-            if (partCount > 1 && parts != null) {
-                sms.sendMultipartTextMessage(normalized, null, parts, sentIntents, delIntents)
-            } else {
-                sms.sendTextMessage(normalized, null, body, sentIntents[0], delIntents[0])
-            }
+            try {
+                if (partCount > 1 && parts != null) {
+                    sms.sendMultipartTextMessage(normalized, null, parts, sentIntents, delIntents)
+                } else {
+                    sms.sendTextMessage(normalized, null, body, sentIntents[0], delIntents[0])
+                }
 
-            val resultCode = SmsSentWaiters.awaitSent(code)
-            if (resultCode != android.app.Activity.RESULT_OK) {
-                return mapOf(
-                    "ok" to false,
-                    "status" to "failed",
-                    "error" to SmsSentWaiters.sentErrorMessage(resultCode),
-                    "address" to normalized,
-                    "resultCode" to resultCode,
-                    "subscriptionId" to subscriptionId,
+                val outcome = SmsSentWaiters.awaitSent(code)
+                if (outcome.resultCode != android.app.Activity.RESULT_OK) {
+                    return mapOf(
+                        "ok" to false,
+                        "status" to "failed",
+                        "error" to SmsSentWaiters.sentErrorMessage(outcome),
+                        "address" to normalized,
+                        "resultCode" to outcome.resultCode,
+                        "noDefault" to outcome.noDefault,
+                        "errorCode" to outcome.errorCode,
+                        "subscriptionId" to resolvedSub,
+                    )
+                }
+
+                writeToSentBox(normalized, body)
+                SmsEventHub.emit(
+                    mapOf(
+                        "type" to "onSmsChanged",
+                        "reason" to "sent",
+                        "address" to normalized,
+                        "body" to body,
+                        "dateMs" to System.currentTimeMillis(),
+                        "subscriptionId" to resolvedSub,
+                    ),
                 )
-            }
-
-            writeToSentBox(normalized, body)
-            SmsEventHub.emit(
                 mapOf(
-                    "type" to "onSmsChanged",
-                    "reason" to "sent",
+                    "ok" to true,
+                    "status" to "sent",
                     "address" to normalized,
-                    "body" to body,
-                    "dateMs" to System.currentTimeMillis(),
-                    "subscriptionId" to subscriptionId,
-                ),
-            )
-            mapOf(
-                "ok" to true,
-                "status" to "sent",
-                "address" to normalized,
-                "subscriptionId" to subscriptionId,
-                "error" to null,
-            )
+                    "subscriptionId" to resolvedSub,
+                    "error" to null,
+                )
+            } finally {
+                try {
+                    activity.unregisterReceiver(liveReceiver)
+                } catch (_: Exception) {
+                }
+            }
         } catch (e: Exception) {
             mapOf(
                 "ok" to false,
@@ -799,7 +858,17 @@ class SmsHelper(private val activity: Activity) {
         var cancelled = false
         var consecutiveFails = 0
         val results = mutableListOf<Map<String, Any?>>()
+        val oemSlow = isAggressiveOem()
+        val wakeLock = try {
+            val pm = activity.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "pyx:sms_blast")?.also {
+                it.acquire((cleaned.size * 8_000L).coerceIn(60_000L, 3_600_000L))
+            }
+        } catch (_: Exception) {
+            null
+        }
 
+        try {
         for (index in cleaned.indices) {
             val address = cleaned[index]
             if (cancelFlag.get()) {
@@ -855,7 +924,7 @@ class SmsHelper(private val activity: Activity) {
                 ),
             )
             // Pace blasts so the modem can keep up (codes 16/124 = busy/overloaded).
-            // PH prepaid modems often need 2s+ between recipients.
+            // Realme/Oppo ColorOS radios need longer gaps than stock Android.
             val partHint = try {
                 smsManagerFor(
                     (result["subscriptionId"] as? Number)?.toInt() ?: -1,
@@ -863,7 +932,7 @@ class SmsHelper(private val activity: Activity) {
             } catch (_: Exception) {
                 1
             }
-            val delayMs = when {
+            val base = when {
                 consecutiveFails >= 5 -> 8000L
                 consecutiveFails >= 3 -> 4500L
                 consecutiveFails >= 1 -> 3000L
@@ -871,6 +940,7 @@ class SmsHelper(private val activity: Activity) {
                 partHint > 1 -> 2200L
                 else -> 1800L
             }
+            val delayMs = if (oemSlow) (base * 2L).coerceAtLeast(3500L) else base
             try {
                 Thread.sleep(delayMs)
             } catch (_: InterruptedException) {
@@ -878,9 +948,15 @@ class SmsHelper(private val activity: Activity) {
             if (consecutiveFails >= 5 && consecutiveFails % 5 == 0) {
                 // Cool-down so carrier/modem can recover from burst rejects.
                 try {
-                    Thread.sleep(10_000L)
+                    Thread.sleep(if (oemSlow) 15_000L else 10_000L)
                 } catch (_: InterruptedException) {
                 }
+            }
+        }
+        } finally {
+            try {
+                if (wakeLock?.isHeld == true) wakeLock.release()
+            } catch (_: Exception) {
             }
         }
 
@@ -919,6 +995,7 @@ class SmsHelper(private val activity: Activity) {
             "total" to cleaned.size,
             "cancelled" to cancelled,
             "results" to results,
+            "oemSlowPace" to oemSlow,
         )
     }
 
@@ -1021,11 +1098,131 @@ class SmsHelper(private val activity: Activity) {
     }
 
     private fun smsManagerFor(subscriptionId: Int): SmsManager {
-        return if (subscriptionId >= 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-            SmsManager.getSmsManagerForSubscriptionId(subscriptionId)
-        } else {
-            @Suppress("DEPRECATION")
-            SmsManager.getDefault()
+        val sub = resolveConcreteSubscriptionId(subscriptionId)
+        if (sub >= 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                try {
+                    activity.getSystemService(SmsManager::class.java)
+                        ?.createForSubscriptionId(sub)
+                        ?: SmsManager.getSmsManagerForSubscriptionId(sub)
+                } catch (_: Exception) {
+                    SmsManager.getSmsManagerForSubscriptionId(sub)
+                }
+            } else {
+                SmsManager.getSmsManagerForSubscriptionId(sub)
+            }
+        }
+        @Suppress("DEPRECATION")
+        return SmsManager.getDefault()
+    }
+
+    /**
+     * Never leave subscription unbound on dual-SIM ColorOS — getDefault() +
+     * "Ask every time" yields RESULT_ERROR_GENERIC_FAILURE with noDefault=true.
+     */
+    private fun resolveConcreteSubscriptionId(preferredId: Int): Int {
+        if (preferredId >= 0) return preferredId
+        val order = subscriptionTryOrder(-1)
+        return order.firstOrNull { it >= 0 } ?: defaultSmsSubscriptionId()
+    }
+
+    private fun smsPendingIntentFlags(): Int {
+        // MUTABLE: radio fills errorCode / noDefault extras (needed on Realme/Oppo).
+        return PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+    }
+
+    private fun isAggressiveOem(): Boolean {
+        val m = Build.MANUFACTURER.orEmpty().lowercase()
+        val b = Build.BRAND.orEmpty().lowercase()
+        return listOf("realme", "oppo", "oneplus", "vivo", "iqoo", "xiaomi", "redmi", "poco", "tecno", "infinix")
+            .any { m.contains(it) || b.contains(it) }
+    }
+
+    fun deviceSmsHints(): Map<String, Any?> {
+        val manufacturer = Build.MANUFACTURER.orEmpty()
+        val brand = Build.BRAND.orEmpty()
+        val model = Build.MODEL.orEmpty()
+        val aggressive = isAggressiveOem()
+        val ignoringBattery = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val pm = activity.getSystemService(PowerManager::class.java)
+                pm?.isIgnoringBatteryOptimizations(activity.packageName) == true
+            } else {
+                true
+            }
+        } catch (_: Exception) {
+            false
+        }
+        val tips = mutableListOf<String>()
+        if (aggressive) {
+            tips.add("Set Preferred SIM for SMS to the SIM with load (not Ask every time).")
+            tips.add("Settings → Battery → PYX Food Products → Unrestricted / Allow background.")
+            tips.add("Keep the screen on while Blast runs.")
+            tips.add("Under Send via, pick the SIM with load (not only Auto).")
+        }
+        return mapOf(
+            "manufacturer" to manufacturer,
+            "brand" to brand,
+            "model" to model,
+            "aggressiveOem" to aggressive,
+            "ignoringBatteryOptimizations" to ignoringBattery,
+            "tips" to tips,
+        )
+    }
+
+    fun requestIgnoreBatteryOptimizations(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+        return try {
+            val pm = activity.getSystemService(PowerManager::class.java)
+            if (pm?.isIgnoringBatteryOptimizations(activity.packageName) == true) return true
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:${activity.packageName}")
+            }
+            activity.startActivity(intent)
+            true
+        } catch (_: Exception) {
+            try {
+                activity.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
+
+    fun openPreferredSmsSimSettings(): Boolean {
+        val candidates = listOf(
+            Intent(Settings.ACTION_WIRELESS_SETTINGS),
+            Intent("android.settings.SIM_SUB_INFO_SETTINGS"),
+            Intent(Settings.ACTION_NETWORK_OPERATOR_SETTINGS),
+            Intent().setComponent(
+                ComponentName(
+                    "com.android.settings",
+                    "com.android.settings.Settings\$SimSettingsActivity",
+                ),
+            ),
+            Intent().setComponent(
+                ComponentName(
+                    "com.coloros.phonemanager",
+                    "com.coloros.phonemanager.cleanclean.PhoneManagerMainActivity",
+                ),
+            ),
+        )
+        for (intent in candidates) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (intent.resolveActivity(activity.packageManager) != null) {
+                    activity.startActivity(intent)
+                    return true
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return try {
+            activity.startActivity(Intent(Settings.ACTION_SETTINGS))
+            true
+        } catch (_: Exception) {
+            false
         }
     }
 

@@ -242,6 +242,24 @@ class CallBridge {
     return (result as Map)['requested'] == true;
   }
 
+  static Future<Map<String, dynamic>> deviceSmsHints() async {
+    final result = await _methods.invokeMethod<dynamic>('deviceSmsHints');
+    if (result is! Map) return const {};
+    return Map<String, dynamic>.from(result);
+  }
+
+  static Future<bool> requestIgnoreBatteryOptimizations() async {
+    final result =
+        await _methods.invokeMethod<dynamic>('requestIgnoreBatteryOptimizations');
+    return (result as Map)['ok'] == true;
+  }
+
+  static Future<bool> openPreferredSmsSimSettings() async {
+    final result =
+        await _methods.invokeMethod<dynamic>('openPreferredSmsSimSettings');
+    return (result as Map)['ok'] == true;
+  }
+
   static Future<bool> openMmsComposer({
     required List<String> addresses,
     String body = '',

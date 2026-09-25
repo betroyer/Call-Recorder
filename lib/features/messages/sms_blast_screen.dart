@@ -35,6 +35,10 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
   bool _sending = false;
   bool _smsSend = false;
   bool _isDefaultSms = false;
+  bool _aggressiveOem = false;
+  bool _ignoringBattery = true;
+  String _deviceLabel = '';
+  List<String> _oemTips = const [];
 
   int _progressIndex = 0;
   int _progressTotal = 0;
@@ -96,6 +100,17 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
     _isDefaultSms = perms['defaultSms'] == true;
     try {
       _sims = await CallBridge.listSims();
+      final hints = await CallBridge.deviceSmsHints();
+      _aggressiveOem = hints['aggressiveOem'] == true;
+      _ignoringBattery = hints['ignoringBatteryOptimizations'] == true;
+      final brand = hints['brand']?.toString() ?? '';
+      final model = hints['model']?.toString() ?? '';
+      _deviceLabel = [brand, model].where((s) => s.trim().isNotEmpty).join(' ');
+      _oemTips = (hints['tips'] as List?)
+              ?.map((e) => e.toString())
+              .where((s) => s.isNotEmpty)
+              .toList() ??
+          const [];
       await _loadHistory();
     } catch (_) {}
     if (mounted) setState(() {});
@@ -1010,6 +1025,65 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
               message: _sims.any((s) => s['lastSuccessful'] == true)
                   ? 'Using your SIM card. Prefer Auto or the SIM marked “has load / last OK” under Send via.'
                   : 'Using your SIM card. Send one test from Message first, then pick that SIM (or Auto) here.',
+            ),
+          ),
+        if (_aggressiveOem)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Card(
+              color: Theme.of(context)
+                  .colorScheme
+                  .tertiaryContainer
+                  .withValues(alpha: 0.55),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Realme / ColorOS SMS setup'
+                      '${_deviceLabel.isEmpty ? '' : ' · $_deviceLabel'}',
+                      style: theme.textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'This phone family often blocks blast SMS unless Preferred SIM '
+                      'for SMS is fixed (not Ask every time) and battery is Unrestricted.',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    if (_oemTips.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      ..._oemTips.map(
+                        (t) => Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: Text('• $t', style: theme.textTheme.bodySmall),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        FilledButton.tonal(
+                          onPressed: () async {
+                            await CallBridge.openPreferredSmsSimSettings();
+                          },
+                          child: const Text('Open SIM settings'),
+                        ),
+                        if (!_ignoringBattery)
+                          FilledButton.tonal(
+                            onPressed: () async {
+                              await CallBridge.requestIgnoreBatteryOptimizations();
+                              await _bootstrap();
+                            },
+                            child: const Text('Allow unrestricted battery'),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         Row(

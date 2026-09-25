@@ -203,6 +203,11 @@ class CallVaultBridge(
             }
             "isDefaultSmsApp" -> result.success(mapOf("isDefault" to smsHelper.isDefaultSmsApp()))
             "requestDefaultSmsRole" -> result.success(mapOf("requested" to smsHelper.requestDefaultSmsRole()))
+            "deviceSmsHints" -> result.success(smsHelper.deviceSmsHints())
+            "requestIgnoreBatteryOptimizations" ->
+                result.success(mapOf("ok" to smsHelper.requestIgnoreBatteryOptimizations()))
+            "openPreferredSmsSimSettings" ->
+                result.success(mapOf("ok" to smsHelper.openPreferredSmsSimSettings()))
             "openMmsComposer" -> {
                 val addresses = call.argument<List<String>>("addresses") ?: emptyList()
                 val body = call.argument<String>("body") ?: ""

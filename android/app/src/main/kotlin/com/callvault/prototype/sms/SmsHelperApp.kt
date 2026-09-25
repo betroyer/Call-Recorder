@@ -64,7 +64,7 @@ class SmsHelperApp(private val context: Context) {
                         context,
                         code * 10 + index,
                         sentIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
                     ),
                 )
                 delIntents.add(
@@ -72,7 +72,7 @@ class SmsHelperApp(private val context: Context) {
                         context,
                         code * 10 + index + 500_000,
                         delIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
                     ),
                 )
             }
@@ -83,14 +83,16 @@ class SmsHelperApp(private val context: Context) {
                 sms.sendTextMessage(normalized, null, body, sentIntents[0], delIntents[0])
             }
 
-            val resultCode = SmsSentWaiters.awaitSent(code)
-            if (resultCode != Activity.RESULT_OK) {
+            val outcome = SmsSentWaiters.awaitSent(code)
+            if (outcome.resultCode != Activity.RESULT_OK) {
                 return mapOf(
                     "ok" to false,
                     "status" to "failed",
-                    "error" to SmsSentWaiters.sentErrorMessage(resultCode),
+                    "error" to SmsSentWaiters.sentErrorMessage(outcome),
                     "address" to normalized,
-                    "resultCode" to resultCode,
+                    "resultCode" to outcome.resultCode,
+                    "noDefault" to outcome.noDefault,
+                    "errorCode" to outcome.errorCode,
                 )
             }
 
