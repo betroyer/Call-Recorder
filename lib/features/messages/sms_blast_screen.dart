@@ -280,6 +280,23 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
         .toList();
   }
 
+  /// Drop successfully sent numbers from the recipients input; leave failed ones.
+  void _removeSentFromRecipients(List<Map<String, dynamic>> results) {
+    final sentKeys = <String>{};
+    for (final r in results) {
+      if (r['ok'] != true) continue;
+      final addr = r['address']?.toString() ?? '';
+      final key = PhoneMatch.matchKey(addr);
+      if (key.isNotEmpty) sentKeys.add(key);
+    }
+    if (sentKeys.isEmpty) return;
+    final remaining = _parseNumbers(_numbers.text).where((raw) {
+      final key = PhoneMatch.matchKey(raw);
+      return key.isEmpty || !sentKeys.contains(key);
+    }).toList();
+    _numbers.text = remaining.join('\n');
+  }
+
   List<String> _uniqueRecipients() =>
       PhoneMatch.uniqueNormalized(_parseNumbers(_numbers.text));
 
@@ -649,6 +666,8 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
       setState(() {
         _lastResults = results;
         _sending = false;
+        // Remove successfully sent numbers from the recipients box; keep failed/cancelled.
+        _removeSentFromRecipients(results);
       });
       await _bootstrap();
       if (!mounted) return;
