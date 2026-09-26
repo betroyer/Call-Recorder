@@ -5,6 +5,7 @@ import 'bridge/call_bridge.dart';
 import 'features/messages/inbox_screen.dart';
 import 'features/messages/compose_screen.dart';
 import 'features/messages/sms_blast_screen.dart';
+import 'features/notes/notes_screen.dart';
 import 'prototype/prototype_screen.dart';
 import 'widgets/app_ui.dart';
 
@@ -18,7 +19,7 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _index = 0;
 
-  static const _titles = ['Record', 'Inbox', 'Message', 'SMS Blast'];
+  static const _titles = ['Record', 'Inbox', 'Message', 'SMS Blast', 'Notes'];
 
   @override
   void initState() {
@@ -34,6 +35,7 @@ class _AppShellState extends State<AppShell> {
       const InboxScreen(),
       const ComposeScreen(),
       const SmsBlastScreen(),
+      const NotesScreen(),
     ];
 
     return Scaffold(
@@ -87,6 +89,11 @@ class _AppShellState extends State<AppShell> {
             icon: Icon(Icons.campaign_outlined),
             selectedIcon: Icon(Icons.campaign_rounded),
             label: 'Blast',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.sticky_note_2_outlined),
+            selectedIcon: Icon(Icons.sticky_note_2_rounded),
+            label: 'Notes',
           ),
         ],
       ),

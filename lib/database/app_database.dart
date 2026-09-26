@@ -41,12 +41,20 @@ class BlastRecipients extends Table {
   TextColumn get error => text().nullable()();
 }
 
-@DriftDatabase(tables: [SmsTemplates, BlastJobs, BlastRecipients])
+class Notes extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get title => text().withDefault(const Constant(''))();
+  TextColumn get body => text()();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
+}
+
+@DriftDatabase(tables: [SmsTemplates, BlastJobs, BlastRecipients, Notes])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_open());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -54,6 +62,9 @@ class AppDatabase extends _$AppDatabase {
         onUpgrade: (m, from, to) async {
           if (from < 2) {
             await m.addColumn(blastJobs, blastJobs.attempt);
+          }
+          if (from < 3) {
+            await m.createTable(notes);
           }
         },
       );
@@ -184,6 +195,39 @@ class AppDatabase extends _$AppDatabase {
           ..limit(1))
         .getSingleOrNull();
   }
+
+  Future<List<Note>> allNotes() =>
+      (select(notes)..orderBy([(t) => OrderingTerm.desc(t.updatedAt)])).get();
+
+  Future<int> insertNote({String title = '', required String body}) {
+    final now = DateTime.now();
+    return into(notes).insert(
+      NotesCompanion.insert(
+        title: Value(title.trim()),
+        body: body.trim(),
+        createdAt: Value(now),
+        updatedAt: Value(now),
+      ),
+    );
+  }
+
+  Future<bool> updateNote({
+    required int id,
+    String title = '',
+    required String body,
+  }) async {
+    final n = await (update(notes)..where((t) => t.id.equals(id))).write(
+      NotesCompanion(
+        title: Value(title.trim()),
+        body: Value(body.trim()),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+    return n > 0;
+  }
+
+  Future<int> deleteNote(int id) =>
+      (delete(notes)..where((t) => t.id.equals(id))).go();
 }
 
 LazyDatabase _open() {
