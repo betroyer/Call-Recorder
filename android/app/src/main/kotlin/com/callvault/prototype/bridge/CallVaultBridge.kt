@@ -230,6 +230,7 @@ class CallVaultBridge(
                 val subscriptionId = call.argument<Int>("subscriptionId") ?: -1
                 val allSims = call.argument<Boolean>("allSims") == true
                 val blastId = call.argument<String>("blastId")
+                val paceMode = call.argument<String>("paceMode") ?: "rumble"
                 Thread {
                     val payload = smsHelper.sendBlast(
                         addresses = addresses,
@@ -237,6 +238,7 @@ class CallVaultBridge(
                         subscriptionId = subscriptionId,
                         allSims = allSims,
                         blastId = blastId,
+                        paceMode = paceMode,
                         onProgress = { p -> emit(p) },
                     )
                     activity.runOnUiThread { result.success(payload) }

@@ -875,6 +875,8 @@ class SmsHelper(private val activity: Activity) {
         subscriptionId: Int = -1,
         allSims: Boolean = false,
         blastId: String? = null,
+        /** "rumble" = random 1–5 min between numbers; "fast" = short modem pacing. */
+        paceMode: String = "rumble",
         onProgress: ((Map<String, Any?>) -> Unit)? = null,
     ): Map<String, Any?> {
         cancelFlag.set(false)
@@ -908,6 +910,7 @@ class SmsHelper(private val activity: Activity) {
             )
         }
 
+        val rumble = paceMode.equals("rumble", ignoreCase = true)
         val id = blastId ?: UUID.randomUUID().toString()
         val simIds = activeSubscriptionIds()
         var sent = 0
@@ -916,10 +919,11 @@ class SmsHelper(private val activity: Activity) {
         var consecutiveFails = 0
         val results = mutableListOf<Map<String, Any?>>()
         val oemSlow = isAggressiveOem()
+        val perMsgMs = if (rumble) 5L * 60_000L else 8_000L
         val wakeLock = try {
             val pm = activity.getSystemService(Context.POWER_SERVICE) as? PowerManager
             pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "pyx:sms_blast")?.also {
-                it.acquire((cleaned.size * 8_000L).coerceIn(60_000L, 3_600_000L))
+                it.acquire((cleaned.size * perMsgMs).coerceIn(60_000L, 12L * 60L * 60L * 1000L))
             }
         } catch (_: Exception) {
             null
@@ -946,9 +950,6 @@ class SmsHelper(private val activity: Activity) {
                 )
                 break
             }
-            // Auto (-1): let sendSms pick last-OK SIM + failover.
-            // Explicit SIM: use that slot only.
-            // allSims: optional round-robin (legacy) — prefer Auto for load.
             val subId = when {
                 subscriptionId >= 0 -> subscriptionId
                 allSims && simIds.size > 1 -> simIds[index % simIds.size]
@@ -965,6 +966,37 @@ class SmsHelper(private val activity: Activity) {
                 consecutiveFails++
             }
 
+            val hasMore = index < cleaned.lastIndex && !cancelFlag.get()
+            val nextDelayMs = if (!hasMore) {
+                0L
+            } else if (rumble) {
+                // Random 1–5 minutes between numbers (inclusive).
+                (60_000L..300_000L).random()
+            } else {
+                val partHint = try {
+                    smsManagerFor(
+                        (result["subscriptionId"] as? Number)?.toInt() ?: -1,
+                    ).divideMessage(body)?.size ?: 1
+                } catch (_: Exception) {
+                    1
+                }
+                val resultCode = (result["resultCode"] as? Number)?.toInt() ?: -1
+                val base = when {
+                    resultCode == 124 || resultCode == 16 -> 12_000L
+                    consecutiveFails >= 5 -> 8000L
+                    consecutiveFails >= 3 -> 4500L
+                    consecutiveFails >= 1 -> 3000L
+                    partHint > 3 -> 2800L
+                    partHint > 1 -> 2200L
+                    else -> 1800L
+                }
+                var delayMs = if (oemSlow) (base * 2L).coerceAtLeast(3500L) else base
+                if (resultCode == 124 || resultCode == 16 || (consecutiveFails >= 3 && consecutiveFails % 3 == 0)) {
+                    delayMs += if (oemSlow) 20_000L else 12_000L
+                }
+                delayMs
+            }
+
             onProgress?.invoke(
                 mapOf(
                     "type" to "onBlastProgress",
@@ -978,36 +1010,29 @@ class SmsHelper(private val activity: Activity) {
                     "failed" to failed,
                     "done" to false,
                     "cancelled" to false,
+                    "paceMode" to if (rumble) "rumble" else "fast",
+                    "nextDelayMs" to nextDelayMs,
+                    "waiting" to (nextDelayMs > 0),
                 ),
             )
-            // Pace blasts so the modem can keep up (codes 16/124 = busy/overloaded).
-            // Realme/Oppo ColorOS radios need longer gaps than stock Android.
-            val partHint = try {
-                smsManagerFor(
-                    (result["subscriptionId"] as? Number)?.toInt() ?: -1,
-                ).divideMessage(body)?.size ?: 1
-            } catch (_: Exception) {
-                1
-            }
-            val resultCode = (result["resultCode"] as? Number)?.toInt() ?: -1
-            val base = when {
-                resultCode == 124 || resultCode == 16 -> 12_000L
-                consecutiveFails >= 5 -> 8000L
-                consecutiveFails >= 3 -> 4500L
-                consecutiveFails >= 1 -> 3000L
-                partHint > 3 -> 2800L
-                partHint > 1 -> 2200L
-                else -> 1800L
-            }
-            val delayMs = if (oemSlow) (base * 2L).coerceAtLeast(3500L) else base
-            try {
-                Thread.sleep(delayMs)
-            } catch (_: InterruptedException) {
-            }
-            if (resultCode == 124 || resultCode == 16 || (consecutiveFails >= 3 && consecutiveFails % 3 == 0)) {
-                try {
-                    Thread.sleep(if (oemSlow) 20_000L else 12_000L)
-                } catch (_: InterruptedException) {
+
+            if (nextDelayMs > 0) {
+                sleepInterruptible(nextDelayMs)
+                if (cancelFlag.get()) {
+                    cancelled = true
+                    onProgress?.invoke(
+                        mapOf(
+                            "type" to "onBlastProgress",
+                            "blastId" to id,
+                            "index" to index,
+                            "total" to cleaned.size,
+                            "sent" to sent,
+                            "failed" to failed,
+                            "done" to true,
+                            "cancelled" to true,
+                        ),
+                    )
+                    break
                 }
             }
         }
@@ -1042,6 +1067,8 @@ class SmsHelper(private val activity: Activity) {
                 "failed" to failed,
                 "done" to true,
                 "cancelled" to cancelled,
+                "waiting" to false,
+                "nextDelayMs" to 0,
             ),
         )
 
@@ -1053,8 +1080,23 @@ class SmsHelper(private val activity: Activity) {
             "total" to cleaned.size,
             "cancelled" to cancelled,
             "results" to results,
+            "paceMode" to if (rumble) "rumble" else "fast",
             "oemSlowPace" to oemSlow,
         )
+    }
+
+    /** Sleep in 1s chunks so Cancel can stop a long rumble wait. */
+    private fun sleepInterruptible(totalMs: Long) {
+        var left = totalMs.coerceAtLeast(0L)
+        while (left > 0 && !cancelFlag.get()) {
+            val chunk = left.coerceAtMost(1_000L)
+            try {
+                Thread.sleep(chunk)
+            } catch (_: InterruptedException) {
+                break
+            }
+            left -= chunk
+        }
     }
 
     fun scheduleBlast(

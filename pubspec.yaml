@@ -1,7 +1,7 @@
 name: callvault_prototype
 description: CallVault critical recording prototype — detect SIM call, record, save, play.
 publish_to: "none"
-version: 1.4.9+49
+version: 1.5.0+50
 
 environment:
   sdk: ^3.12.2

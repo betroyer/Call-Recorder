@@ -31,6 +31,8 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
   String _priority = 'Low';
   /// 0 = normal; 1–3 = undelivered-order follow-up attempt.
   int _attempt = 0;
+  /// rumble = random 1–5 min between numbers; fast = short gaps.
+  String _paceMode = 'rumble';
   DateTime? _scheduledAt;
   bool _sending = false;
   bool _smsSend = false;
@@ -47,6 +49,8 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
   int _progressSent = 0;
   int _progressFailed = 0;
   String? _progressAddress;
+  int _nextDelayMs = 0;
+  bool _waitingNext = false;
   List<Map<String, dynamic>> _lastResults = const [];
   StreamSubscription<Map<String, dynamic>>? _eventsSub;
 
@@ -73,8 +77,12 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
         _progressSent = (e['sent'] as num?)?.toInt() ?? _progressSent;
         _progressFailed = (e['failed'] as num?)?.toInt() ?? _progressFailed;
         _progressAddress = e['address']?.toString();
+        _nextDelayMs = (e['nextDelayMs'] as num?)?.toInt() ?? 0;
+        _waitingNext = e['waiting'] == true && _nextDelayMs > 0;
         if (e['done'] == true) {
           _sending = false;
+          _waitingNext = false;
+          _nextDelayMs = 0;
         }
       });
     });
@@ -306,6 +314,24 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
         3 => '3rd attempt',
         _ => 'Normal blast',
       };
+
+  String _rumbleEtaLabel(int count) {
+    if (count <= 1) return 'a few minutes';
+    // Gaps are between sends: (n-1) waits, avg 3 min.
+    final avgMin = ((count - 1) * 3).clamp(1, 9999);
+    if (avgMin < 60) return '$avgMin min';
+    final h = avgMin ~/ 60;
+    final m = avgMin % 60;
+    return m == 0 ? '~$h h' : '~$h h $m min';
+  }
+
+  String _formatDelay(int ms) {
+    final totalSec = (ms / 1000).round().clamp(0, 99999);
+    final min = totalSec ~/ 60;
+    final sec = totalSec % 60;
+    if (min <= 0) return '${sec}s';
+    return '${min}m ${sec.toString().padLeft(2, '0')}s';
+  }
 
   ({int chars, int pages}) _smsMeta(String text) {
     final isGsm = text.codeUnits.every((c) => c <= 127);
@@ -636,6 +662,8 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
       _progressSent = 0;
       _progressFailed = 0;
       _progressAddress = null;
+      _nextDelayMs = 0;
+      _waitingNext = false;
       _lastResults = const [];
     });
     try {
@@ -645,6 +673,7 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
         subscriptionId: _subscriptionId,
         allSims: false,
         blastId: blastId,
+        paceMode: _paceMode,
       );
       final results = (result['results'] as List?)
               ?.whereType<Map>()
@@ -1182,6 +1211,45 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
         const SizedBox(height: 8),
         InputDecorator(
           decoration: const InputDecoration(
+            labelText: 'Send pace',
+            helperText:
+                'Rumble = random 1–5 min between numbers (safer vs rate limit)',
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              isExpanded: true,
+              value: _paceMode,
+              items: const [
+                DropdownMenuItem(
+                  value: 'rumble',
+                  child: Text('Rumble — random 1–5 min between sends'),
+                ),
+                DropdownMenuItem(
+                  value: 'fast',
+                  child: Text('Fast — short gaps (seconds)'),
+                ),
+              ],
+              onChanged: _sending
+                  ? null
+                  : (v) => setState(() => _paceMode = v ?? 'rumble'),
+            ),
+          ),
+        ),
+        if (_paceMode == 'rumble' && unique > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 4),
+            child: Text(
+              'Est. ~${_rumbleEtaLabel(unique)} for $unique numbers (keep screen on).',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        const SizedBox(height: 8),
+        InputDecorator(
+          decoration: const InputDecoration(
             labelText: 'Order follow-up attempt',
             helperText: 'Tag 1st / 2nd / 3rd for undelivered-order reminders',
             border: OutlineInputBorder(),
@@ -1335,6 +1403,13 @@ class _SmsBlastScreenState extends State<SmsBlastScreen> with WidgetsBindingObse
             '${_progressAddress != null ? ' · $_progressAddress' : ''}'
             ' · sent $_progressSent · failed $_progressFailed',
           ),
+          if (_waitingNext && _nextDelayMs > 0)
+            Text(
+              'Waiting ${_formatDelay(_nextDelayMs)} before next number…',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.primary,
+              ),
+            ),
           TextButton(
             onPressed: () => CallBridge.cancelSmsBlast(),
             child: const Text('Cancel blast'),

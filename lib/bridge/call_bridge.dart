@@ -197,6 +197,7 @@ class CallBridge {
     int subscriptionId = -1,
     bool allSims = false,
     String? blastId,
+    String paceMode = 'rumble',
   }) async {
     final result = await _methods.invokeMethod<dynamic>('sendSmsBlast', {
       'addresses': addresses,
@@ -204,6 +205,7 @@ class CallBridge {
       'subscriptionId': subscriptionId,
       'allSims': allSims,
       'blastId': blastId,
+      'paceMode': paceMode,
     });
     return Map<String, dynamic>.from(result as Map);
   }
