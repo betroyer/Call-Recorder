@@ -91,6 +91,12 @@ class SlashTemplates {
       title: 'Delivered thanks',
       body: _delivered,
     ),
+    SlashTemplate(
+      keyword: 'promo',
+      title: 'Christmas Suki Promo',
+      aliases: ['christmas', 'sukipromo'],
+      body: _promoChristmas,
+    ),
   ];
 
   /// Active `/query` at end of [text], or null if picker should hide.
@@ -249,4 +255,19 @@ Order has been successfully delivered. Maraming salamat po sa pag tangkilik nag 
 PS: We'd like to hear from you 🙂 We hope you find time to send us your proof of order and feedback. 🙂
 
 Thank you! Stay Safe and BEE healthy :).
+''';
+
+const _promoChristmas = '''
+CHRISTMAS SUKI PROMO!
+
+3 Liters FINEST HONEY
+FREE 350ML FINEST HONEY
+
+P1,699 ONLY!
+
+Mas maraming Honey, mas malaking tipid! Perfect for daily use, family, or gift this Christmas.
+
+Starting today, until supplies last!
+
+Message us to order, SUKI!
 ''';
